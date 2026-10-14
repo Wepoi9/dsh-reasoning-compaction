@@ -1,0 +1,970 @@
+diff --git a/README.md b/README.md
+index 7941e30f..3fd4d9de 100644
+--- a/README.md
++++ b/README.md
+@@ -75,3 +75,35 @@ For agents, follow [AGENTS.md](AGENTS.md).
+ [MIT](LICENSE)
+ 
+ Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
++
++## Changes in this tree
++
++This tree is based on upstream DeepSeek Harness tag `dsh-v0.2.1-alpha.2`
++(commit `d7432673`). Only the client chat UI changed; the server-side
++compaction protocol and durable records are unchanged.
++
++- Reasoning blocks auto-expand once at the first generating render that has
++  body text (DSH batches reasoning diffs, so body text can exist at first
++  paint); a manual close is then respected for the rest of the generation.
++  If no reasoning body ever appears, check the model request's reasoning
++  effort first: it comes from the model's default effort or the effort
++  selected in the model picker (`reasoningEffort`), and a `none`/minimal
++  effort returns no reasoning body at all, so set it to `high` when testing
++  this feature.
++- Automatic compaction progress renders as a display-only `running`/`failed`
++  row: the row is built only for a Turn-anchored start whose Turn has not
++  closed, and only while the session is running, so an interrupted run left
++  behind by a closed Turn never shows as in-progress during a later Turn.
++  Reloads of unfinished history stay free of stale running rows. `/compact`
++  markers and Trajectory views keep their existing behaviour.
++- Supported upstream version: `dsh-v0.2.1-alpha.2`. Build this tree with:
++
++  ```sh
++  corepack enable
++  pnpm install --frozen-lockfile
++  pnpm run build
++  ```
++
++  The repository pins `pnpm@11.28.5` via `packageManager` and uses `workspace:*`
++  dependencies, so `npm install` cannot resolve the workspace; run the app
++  after building with `pnpm dsh web`.
+diff --git a/apps/web/tests/lifecycle-chrome.e2e.ts b/apps/web/tests/lifecycle-chrome.e2e.ts
+index a9226b7f..b665a36b 100644
+--- a/apps/web/tests/lifecycle-chrome.e2e.ts
++++ b/apps/web/tests/lifecycle-chrome.e2e.ts
+@@ -340,10 +340,10 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
+         if (MODE !== 'record') {
+           const thinking = page.locator('[data-variant="think"][data-state="running"]')
+           await expandOwningTurnProcess(page, thinking)
+-          await expect.poll(() => thinking.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++          await expect.poll(() => thinking.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+           await reasoningComplete.promise
+           expect(await thinking.getAttribute('data-preview')).toBeNull()
+-          expect(await thinking.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++          expect(await thinking.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+           expect(await thinking.locator('[data-streaming]:not([inert] *)').isVisible()).toBe(false)
+         }
+         observedReasoning.resolve(undefined)
+diff --git a/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx b/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
+index dcc1141b..a1147748 100644
+--- a/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
++++ b/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
+@@ -34,6 +34,9 @@ export interface AssistantMarkdownProps extends Pick<PropsRenderSlots<'conversat
+   useDisclosure: UseDisclosure
+   blocks: readonly AssistantBlock[]
+   streaming: boolean
++  /** Whether the owning Session is generating now; an orphaned streaming tail
++   * renders settled. Omitted direct renders keep the legacy live behavior. */
++  generationLive?: boolean | undefined
+   /** Frozen partial of an aborted turn: rendered with a stopped marker. */
+   interrupted?: boolean | undefined
+   /** Render consecutive image blocks through the attachment slot. */
+@@ -54,7 +57,7 @@ export interface AssistantMarkdownProps extends Pick<PropsRenderSlots<'conversat
+ 
+ /** Reasoning block as the Think variant summary row (figma 39:28304). */
+ export const AssistantMarkdown = memo(function AssistantMarkdown({
+-  blocks, streaming, interrupted, renderMessageImages, groupPart, useDisclosure,
++  blocks, streaming, generationLive = true, interrupted, renderMessageImages, groupPart, useDisclosure,
+   reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
+ }: AssistantMarkdownProps) {
+   // Stable per locale revision (t identity changes on switch): a fresh object
+@@ -99,7 +102,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
+             reveal={revealProcess}
+             useGroupAction={useGroupAction}
+           >
+-            <ReasoningRow text={block.text} running={streaming && i === last} usePresentation={usePresentation}
++            <ReasoningRow text={block.text} running={streaming && i === last} generationLive={generationLive}
++              usePresentation={usePresentation}
+               useDisclosure={useDisclosure} renderSlot={renderSlot} t={t} />
+           </ProcessReasoning>,
+         )
+diff --git a/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx b/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx
+index b77dffb7..af54cd74 100644
+--- a/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx
++++ b/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx
+@@ -9,7 +9,7 @@ type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<P
+ /** Streaming, settled, and interrupted Assistant states share one keyed renderer instance. */
+ export const AssistantNodeView = memo(function AssistantNodeView({
+   node, groupPart, useDisclosure, useGroupAction, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions,
+-  usePresentation, renderSlot, t,
++  usePresentation, renderSlot, running, t,
+ }: AssistantNodeViewProps) {
+   const data = node.data
+   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
+@@ -37,6 +37,7 @@ export const AssistantNodeView = memo(function AssistantNodeView({
+       groupPart={groupPart}
+       useDisclosure={useDisclosure}
+       streaming={data.status === 'running'}
++      generationLive={running}
+       interrupted={data.status === 'interrupted'}
+       renderMessageImages={renderMessageImages}
+       reasoningHidden={reasoningHidden}
+diff --git a/packages/client/ui-chat/src/client/chat/ChatFlow.tsx b/packages/client/ui-chat/src/client/chat/ChatFlow.tsx
+index 1b8306ee..390a9f6e 100644
+--- a/packages/client/ui-chat/src/client/chat/ChatFlow.tsx
++++ b/packages/client/ui-chat/src/client/chat/ChatFlow.tsx
+@@ -31,7 +31,7 @@ export const ChatFlow = memo(function ChatFlow({
+   )
+   const seatProps = {
+     nodeStore, useChatNode, useChatNodeBottom, useChatNodeProcess, usePresentation,
+-    useStore, actions, renderSlot, t, useGroupAction, deferCollapse,
++    useStore, actions, renderSlot, t, useGroupAction, deferCollapse, running,
+     cwd, openFile, openSkill, inspectCall, forkAt, loadImage, renderMessageImages, fileMentions,
+   }
+   const rows = entries.map((entry) => {
+diff --git a/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx b/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
+index 4bc1947d..cc1cb7cf 100644
+--- a/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
++++ b/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
+@@ -47,7 +47,7 @@ function turnOf(node: ChatNode | undefined): number | undefined {
+  */
+ export const ChatNodeSeat = memo(function ChatNodeSeat({
+   nodeKey, groupPart, useChatNode, useChatNodeProcess, usePresentation,
+-  cwd, openFile, openSkill, inspectCall, forkAt,
++  cwd, openFile, openSkill, inspectCall, forkAt, running,
+   loadImage, renderMessageImages, fileMentions, useStore, actions, renderSlot, t, useChatNodeBottom, deferCollapse, useGroupAction,
+ }: ChatNodeSeatProps) {
+   const bottom = useChatNodeBottom(nodeKey)
+@@ -130,12 +130,13 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
+       openSkill,
+       inspectCall,
+       forkAt,
++      running,
+       loadImage,
+       renderMessageImages,
+       fileMentions,
+       turnProcess,
+     }, [
+-    node, groupPart, cwd, openFile, openSkill, inspectCall, forkAt,
++    node, groupPart, cwd, openFile, openSkill, inspectCall, forkAt, running,
+     loadImage, renderMessageImages, fileMentions, turnProcess,
+   ])
+   if (routedNode === undefined || owner === null) return null
+diff --git a/packages/client/ui-chat/src/client/chat/CompactionItem.tsx b/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
+index 006b5705..058d5a6e 100644
+--- a/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
++++ b/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
+@@ -10,11 +10,12 @@ import {
+ } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { ChatViewSlotProps } from '../contract/slots.ts'
+ import { markdownLabels } from '../markdown-labels.ts'
++import type { CompactionProgressNode } from '../contract/chat-nodes.ts'
+ import type { CompactionSummaryNode } from '../contract/snapshot.ts'
+ import css from './MessageItem.module.css'
+ 
+ interface CompactionItemProps {
+-  node: CompactionSummaryNode
++  node: CompactionSummaryNode | CompactionProgressNode
+   /** Optional command title for a manual compaction folded into this marker. */
+   title?: string
+   /** Command settlement text used when structured compaction counts are unavailable. */
+@@ -36,6 +37,25 @@ export const CompactionItem = memo(function CompactionItem({
+ }: CompactionItemProps) {
+   const [expanded, setExpanded] = useState(false)
+   const labels = useMemo(() => markdownLabels(t), [t])
++  // A running or failed automatic row carries no summary yet; render one plain
++  // label row so a start-without-checkpoint never leaves a blank summary row.
++  if ('status' in node) {
++    const statusSummary = node.status === 'running'
++      ? t('message.compaction.summarizing')
++      : node.message ?? t('message.compaction.failed')
++    return (
++      <div className={css.compactionRow}>
++        <span className={css.compactionLeading} aria-hidden>
++          <span className={css.compactionContextIcon} data-compaction-icon="context">
++            <IconApiOutlineRegular />
++          </span>
++        </span>
++        <span className={css.compactionTitle}>{title ?? t('message.compaction')}</span>
++        <span className={css.compactionSep} aria-hidden />
++        <span className={css.compactionSummary}>{statusSummary}</span>
++      </div>
++    )
++  }
+   const expandable = node.summary !== null
+   const open = expandable && expanded
+   const summary = node.shadowedItemCount !== null && node.shadowedTokenCount !== null
+diff --git a/packages/client/ui-chat/src/client/chat/MessageItem.tsx b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
+index 9005150a..c631bd85 100644
+--- a/packages/client/ui-chat/src/client/chat/MessageItem.tsx
++++ b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
+@@ -357,8 +357,13 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
+ })
+ 
+ /** Automatic compaction keyed Chat renderer. */
+-export const CompactionNodeView = memo(function CompactionNodeView({ node, t }: ChatNodeViewProps<'compaction'>) {
+-  return <CompactionItem node={node.data} t={t} />
++export const CompactionNodeView = memo(function CompactionNodeView({ node, running, t }: ChatNodeViewProps<'compaction'>) {
++  const data = node.data
++  // An automatic running row is live chrome: hidden here while the Session is
++  // not running (reload or settled run); the failed row and settled summaries
++  // are rendering state the owner keeps, and are never gated.
++  if ('status' in data && data.status === 'running' && !running) return null
++  return <CompactionItem node={data} t={t} />
+ })
+ 
+ /** Correlated retry-chain keyed Chat renderer. */
+diff --git a/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx b/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx
+index 8bbd738f..21c59efb 100644
+--- a/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx
++++ b/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx
+@@ -1,5 +1,5 @@
+ /** Assistant reasoning disclosure, independent of Tool-call presentation. */
+-import { memo, useMemo } from 'react'
++import { memo, useEffect, useMemo, useRef } from 'react'
+ import { DisclosureRow, IconThinkOutlineRegular, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
+ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+ import type { ChatViewSlotProps, UseDisclosure, UsePresentation } from '../contract/slots.ts'
+@@ -39,56 +39,83 @@ function latestCompletedParagraphFirstLine(text: string): string {
+  * collapsed summaries.
+  * @param props.text - complete or streaming reasoning text.
+  * @param props.running - whether this block is the streaming tail.
++ * @param props.generationLive - whether the owning Session is generating now;
++ *   defaults to true, and an orphaned running tail renders settled preview while false.
+  * @param props.usePresentation - live display-policy selector for this reasoning row.
+  * @param props.useDisclosure - independent open state with enclosing-Turn resets.
+  * @param props.renderSlot - framework renderer for the standard reasoning Body Slot.
+  * @param props.t - conversation locale seat for the disclosure and running status.
+  * @returns the reasoning disclosure.
+  */
+-export const ReasoningRow = memo(function ReasoningRow({ text, running, usePresentation, useDisclosure, renderSlot, t }: {
+-  text: string
+-  running: boolean
+-  useDisclosure: UseDisclosure
+-  usePresentation: UsePresentation
+-  t: ChatViewSlotProps['t']
+-} & Pick<PropsRenderSlots<'conversation.chat.reasoning.body'>, 'renderSlot'>) {
+-  const { expanded, toggle } = useDisclosure()
+-  const summaryText = running ? latestCompletedParagraphFirstLine(text) : firstLine(text)
++export const ReasoningRow = memo(function ReasoningRow({ text, running, generationLive = true, usePresentation,
++  useDisclosure, renderSlot, t }: {
++    text: string
++    running: boolean
++    generationLive?: boolean
++    useDisclosure: UseDisclosure
++    usePresentation: UsePresentation
++    t: ChatViewSlotProps['t']
++  } & Pick<PropsRenderSlots<'conversation.chat.reasoning.body'>, 'renderSlot'>) {
++  const { expanded, toggle, setExpanded } = useDisclosure()
++  // Live streaming chrome is generation chrome: while the owning Session is
++  // not generating, an orphaned running tail carries no live state and shows
++  // settled summary preview instead.
++  const live = running && generationLive
++  const summaryText = live ? latestCompletedParagraphFirstLine(text) : firstLine(text)
+   const summary = useMemo(() => summaryText.replaceAll('**', ''), [summaryText])
+   const preview = usePresentation(policy => !expanded && summary !== ''
+-    && (running || policy.settledReasoningPreview))
++    && (live || policy.settledReasoningPreview))
+   const collapsedContent = useMemo(() => (
+     <>
+       <span className={css.separator} data-shimmer-decoration aria-hidden />
+-      <span className={css.summary} data-streaming={running || undefined}>
++      <span className={css.summary} data-streaming={live || undefined}>
+         <span className={css.summaryText}>
+           <TextShimmer>{summary}</TextShimmer>
+         </span>
+       </span>
+     </>
+-  ), [running, summary])
++  ), [live, summary])
+   const content = useMemo(() => expanded ? (
+     <div className={css.thinkBody}>
+-      {renderSlot('conversation.chat.reasoning.body', { text, running })}
++      {renderSlot('conversation.chat.reasoning.body', { text, running: live })}
+     </div>
+-  ) : undefined, [expanded, renderSlot, running, text])
++  ) : undefined, [expanded, renderSlot, live, text])
++
++  // Auto-expand whenever a generating block carries body and it has not
++  // expanded yet — including the first render: DSH batches reasoning diffs,
++  // so body may already exist when the row first paints. A manual close is
++  // then respected; settled blocks loading with body stay collapsed.
++  const bodyArrived = useRef(false)
++  useEffect(() => {
++    const hasBody = text.trim().length > 0
++    if (!live || !hasBody || bodyArrived.current) {
++      bodyArrived.current = hasBody
++      return
++    }
++    bodyArrived.current = true
++    setExpanded(true)
++  }, [live, text, setExpanded])
++  // A settled block with no body has lost its generation condition; render no
++  // empty Thinking row rather than leaving a blank heading behind — the same
++  // holds for an orphaned tail whose Session no longer generates.
++  if (!live && text.trim().length === 0) return null
+ 
+   return (
+     <div
+       className={css.root}
+       data-variant="think"
+-      data-state={running ? 'running' : 'ok'}
++      data-state={live ? 'running' : 'ok'}
+       data-expanded={expanded || undefined}
+       data-preview={preview || undefined}
+     >
+-      {running && <span className={a11yCss.visuallyHidden}>{t('row.running')}</span>}
++      {live && <span className={a11yCss.visuallyHidden}>{t('row.running')}</span>}
+       <DisclosureRow
+         rowClassName={css.row}
+         leadingClassName={css.leading}
+         titleClassName={css.title}
+         icon={THINK_ICON}
+         title={t('message.think')}
+-        running={running}
++        running={live}
+         open={expanded}
+         expandable
+         expandOnRowClick
+diff --git a/packages/client/ui-chat/src/client/contract/chat-nodes.ts b/packages/client/ui-chat/src/client/contract/chat-nodes.ts
+index cade646b..accb04bd 100644
+--- a/packages/client/ui-chat/src/client/contract/chat-nodes.ts
++++ b/packages/client/ui-chat/src/client/contract/chat-nodes.ts
+@@ -53,6 +53,22 @@ export interface ManualCompactionChatData {
+   readonly compaction: CompactionSummaryNode | null
+ }
+ 
++/**
++ * In-progress or failed automatic-compaction Chat row before its checkpoint
++ * lands; a display-only payload that never enters the durable record union.
++ */
++export interface CompactionProgressNode {
++  readonly kind: 'compaction'
++  /** Lifecycle status of the row rendered before its checkpoint lands. */
++  readonly status: 'running' | 'failed'
++  /** Seq of the `compaction/start`, or error-carrying `compaction/end`, event this row renders. */
++  readonly seq: number
++  /** Recorded wall time of the start or failing end event the row is anchored to. */
++  readonly time: number
++  /** Transient failure reason carried by the end event; never a durable field. */
++  readonly message?: string | undefined
++}
++
+ /** One durable retry chain rendered as a single row. */
+ export interface RetryChatData {
+   readonly attempts: readonly ModelRetryNode[]
+diff --git a/packages/client/ui-chat/src/client/contract/slots.ts b/packages/client/ui-chat/src/client/contract/slots.ts
+index 52d7786e..8ed7cf56 100644
+--- a/packages/client/ui-chat/src/client/contract/slots.ts
++++ b/packages/client/ui-chat/src/client/contract/slots.ts
+@@ -223,6 +223,13 @@ export interface ChatNodeOwnerProps {
+   loadImage: MessageImageLoader
+   renderMessageImages: RenderMessageImages
+   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
++  /**
++   * Whether the owning Session is generating right now. Live generation
++   * chrome — the automatic-compaction running row and the streaming
++   * Thinking row — is shown only while this holds; settled rows are not
++   * gated. An omitted owner reads as not generating (fail-closed).
++   */
++  running?: boolean | undefined
+   /** Turn-process state when this Node belongs to a projected Turn. */
+   turnProcess?: TurnProcessOwnerProps | undefined
+ }
+diff --git a/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts b/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
+index 0423e1ff..8087a6b6 100644
+--- a/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
++++ b/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
+@@ -858,11 +858,17 @@ function legacyContribution(raw: ChatConversationViewNode): LegacyContribution {
+     case 'steering':
+     case 'context':
+     case 'command':
+-    case 'compaction':
+     case 'turn-error':
+     case 'turn-max-tokens':
+     case 'unknown':
+       return { anchorSeq: node.anchorSeq, nodes: [node.data], partial: null, running: null }
++    case 'compaction': {
++      const data = node.data
++      // The legacy slice owns durable records only; an automatic in-progress
++      // or failed row is rendering state that reaches the Chat nodes directly.
++      if ('status' in data) return EMPTY_CONTRIBUTION
++      return { anchorSeq: node.anchorSeq, nodes: [data], partial: null, running: null }
++    }
+     case 'assistant-step': {
+       const data = node.data
+       if (data.status === 'running') {
+diff --git a/packages/client/ui-chat/src/client/conversation-nodes/command.ts b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
+index a52b8775..d4a3fc44 100644
+--- a/packages/client/ui-chat/src/client/conversation-nodes/command.ts
++++ b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
+@@ -28,7 +28,8 @@ interface CommandState {
+   readonly checkpoint?: ConversationMatch
+ }
+ 
+-interface CompactionEvidence {
++/** Summary and checkpoint evidence observed on the command that ran compaction. */
++export interface CompactionEvidence {
+   readonly summary?: ConversationMatch
+   readonly checkpoint?: ConversationMatch
+ }
+diff --git a/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts b/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
+index 9612f087..0d6c1d21 100644
+--- a/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
++++ b/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
+@@ -1,58 +1,136 @@
++// Automatic compaction has no owning slash Command; its shared compaction
++// evidence is adopted as Definition-owned State beside the Command Definition.
++
+ import type { Context } from '@deepseek-ai/cordis'
+ import type {
+   CompactionSummaryNode, ConversationMatch, ConversationNodeContext, ConversationNodeDefinition,
++  ConversationStartMatch,
+ } from '@deepseek-ai/dsh-client-ui-conversation/client'
+-import type {} from '@deepseek-ai/dsh-compaction/types'
++import type { CompactionProgressNode } from '../contract/chat-nodes.ts'
+ import { chatNode } from './common.ts'
+ import { compactSource, compactSummary, updateCompactionState } from './command.ts'
+ 
++/**
++ * Whether this automatic-compaction Context's start anchors a live Turn.
++ * Automatic compaction runs inside a generating Turn, so its start event
++ * carries that Turn; a checkpoint-less start whose run produced neither a
++ * replacement nor an error-carrying end keeps its row only while that Turn
++ * is not closed. A start whose Turn a durable turn/end already closed is
++ * history, never a live run — rendering it in a later generating Turn would
++ * mislabel an interrupted run as in-progress compaction. A session-level
++ * start with no Turn (the legacy auto-compaction shape that a Turn-end event
++ * terminates) and an unresolved start are likewise history. Live running
++ * itself is confirmed separately by the renderer, which hides this row while
++ * the Session is not running.
++ */
++function startCarriesTurn(start: ConversationStartMatch): boolean {
++  const location = start.location
++  return location.kind !== 'session' && location.kind !== 'unresolved'
++    && location.turn.status !== 'closed'
++}
++
+ declare module '../contract/chat-nodes.ts' {
+   interface ChatNodeDataMap {
+-    /** Automatic compaction checkpoint marker. */
+-    compaction: CompactionSummaryNode
++    /**
++     * Automatic compaction: the finalized checkpoint, or the in-progress or
++     * failed row kept for a Turn-anchored start without a terminal event.
++     */
++    compaction: CompactionSummaryNode | CompactionProgressNode
+   }
+ }
+ 
++/**
++ * Compaction events already collected for one automatic-compaction Context.
++ * `summary` is null for an auto-fired (non-command) run; `checkpoint` is the
++ * replacement surface event that finalizes the run; `end` is the optional
++ * lifecycle end, whose error renders the failed row.
++ */
+ interface CompactionState {
+   readonly summary?: ConversationMatch
+   readonly checkpoint?: ConversationMatch
++  readonly end?: ConversationMatch
+ }
+ 
+ function fallbackState(context: ConversationNodeContext<CompactionState>): CompactionState {
+-  const summary = context.matches.find(match => match.event.type === 'compaction/summary')
+   const checkpoint = context.matches.find(match => compactSource(match.event) !== undefined)
++  const summary = context.matches.find(match => match.event.type === 'compaction/summary')
++  const end = context.matches.find(match => match.event.type === 'compaction/end')
+   return {
+-    ...summary === undefined ? {} : { summary },
+     ...checkpoint === undefined ? {} : { checkpoint },
++    ...summary === undefined ? {} : { summary },
++    ...end === undefined ? {} : { end },
+   }
+ }
+ 
+-/** Automatic compaction lifecycle and landed checkpoint Definition. */
++/** Automatic system compaction lifecycle and its standalone summary marker. */
+ export const compactionDefinition: ConversationNodeDefinition<CompactionState> = {
+   kind: 'compaction',
+   target: 'chat',
+   match: (event) => {
+     const checkpoint = compactSource(event)
+-    if (checkpoint !== undefined && checkpoint.sourceCommandId === undefined) {
+-      return { id: checkpoint.compactionId, role: 'update' }
++    if (checkpoint !== undefined) {
++      return checkpoint.sourceCommandId === undefined
++        ? { id: String(checkpoint.compactionId), role: 'update' }
++        : null
+     }
+     if (event.type === 'compaction/start'
+       || event.type === 'compaction/summary'
+       || event.type === 'compaction/end') {
+-      if (event.data.sourceCommandId !== undefined) return null
+-      const compactionId: unknown = event.data.compactionId
+-      if (typeof compactionId !== 'string' || compactionId === '') return null
++      const compactionId = event.data.compactionId
++      if (compactionId === undefined
++        || event.data.sourceCommandId !== undefined
++        || typeof compactionId !== 'string') {
++        return null
++      }
+       return { id: compactionId, role: event.type === 'compaction/start' ? 'start' : 'update' }
+     }
+     return null
+   },
+   start: () => ({}),
+-  update: (context, match) => updateCompactionState(context.state, match),
++  update: (context, match) => (match.event.type === 'compaction/end'
++    ? { ...context.state, end: match }
++    : updateCompactionState(context.state, match)),
+   buildViewNode: (context) => {
+     const state = context.state ?? fallbackState(context)
+-    if (state.checkpoint === undefined) return null
+-    const marker = compactSummary(state.summary, state.checkpoint)
+-    return chatNode(context, 'compaction', marker.seq, marker)
++    const marker = state?.checkpoint === undefined
++      ? undefined
++      : compactSummary(state?.summary, state?.checkpoint)
++    if (marker !== undefined) {
++      return chatNode(context, 'compaction', marker.seq, marker)
++    }
++    const end = state?.end
++    const endPayload = end?.event.data as { readonly error?: unknown } | undefined
++    // A landed checkpoint owns the completed marker above; an error without one
++    // ends the run as one failed row, and an interruption leaves no row at all.
++    if (end !== undefined && endPayload?.error !== undefined) {
++      const data: CompactionProgressNode = {
++        kind: 'compaction',
++        status: 'failed',
++        seq: end.event.seq,
++        time: end.event.time,
++        message: typeof endPayload.error === 'string' ? endPayload.error : undefined,
++      }
++      return chatNode(context, 'compaction', data.seq, data)
++    }
++    const start = context.start
++    // The running row requires its own start event in the loaded window and a
++    // Turn-anchored start whose Turn has not closed; a summary whose start
++    // escaped to another window stays a partial summary, a legacy session-level
++    // start — one a Turn-end event used to terminate — leaves no row, and a
++    // Turn already closed by a durable turn/end is history, not a live run.
++    // The renderer additionally hides the row while the Session is not
++    // running.
++    if (end === undefined && start !== undefined && state?.checkpoint === undefined
++      && startCarriesTurn(start)) {
++      const data: CompactionProgressNode = {
++        kind: 'compaction',
++        status: 'running',
++        seq: start.event.seq,
++        time: start.event.time,
++      }
++      return chatNode(context, 'compaction', data.seq, data)
++    }
++    return null
+   },
+ }
+ 
+diff --git a/packages/client/ui-chat/src/client/index.ts b/packages/client/ui-chat/src/client/index.ts
+index a725061f..f254491b 100644
+--- a/packages/client/ui-chat/src/client/index.ts
++++ b/packages/client/ui-chat/src/client/index.ts
+@@ -23,7 +23,7 @@ export type {
+   TurnNavigationItem, UnknownSurfaceNode, UserMessageNode,
+ } from './contract/snapshot.ts'
+ export type {
+-  AssistantChatData, ChatConversationViewNode, ChatNode, ChatNodeKind,
++  AssistantChatData, ChatConversationViewNode, ChatNode, ChatNodeKind, CompactionProgressNode,
+   FinalAssistantChatData, ManualCompactionChatData, RetryChatData, ToolChatData,
+   TurnProcessChatData, TurnTailChatData,
+ } from './contract/chat-nodes.ts'
+diff --git a/packages/client/ui-chat/src/client/locale.ts b/packages/client/ui-chat/src/client/locale.ts
+index 5d24261a..38bf73dc 100644
+--- a/packages/client/ui-chat/src/client/locale.ts
++++ b/packages/client/ui-chat/src/client/locale.ts
+@@ -139,6 +139,8 @@ export const zh = {
+   'message.context.recall.truncated': '已截断',
+   'message.compaction': '上下文已压缩',
+   'message.compaction.running': '正在压缩…',
++  'message.compaction.summarizing': '正在生成摘要…',
++  'message.compaction.failed': '摘要生成失败',
+   'message.compaction.completed': '已压缩 {items} 条历史记录（约 {tokens} tokens）',
+   'message.compaction.expand': '点击查看压缩摘要',
+   'message.compaction.unavailable': '压缩摘要不可用',
+@@ -336,6 +338,8 @@ export const en = {
+   'message.context.recall.truncated': 'truncated',
+   'message.compaction': 'Context compacted',
+   'message.compaction.running': 'Compacting context…',
++  'message.compaction.summarizing': 'Summarizing…',
++  'message.compaction.failed': 'Summarization failed',
+   'message.compaction.completed': 'Compacted {items} history items (~{tokens} tokens)',
+   'message.compaction.expand': 'View compaction summary',
+   'message.compaction.unavailable': 'Compaction summary unavailable',
+diff --git a/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts b/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts
+index 1a0ed20d..f71bf1bd 100644
+--- a/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts
++++ b/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts
+@@ -8,7 +8,7 @@ import type {
+   ConversationLocationDataSource, ConversationLocationDataStore, ConversationTurnDataMap, TurnLocation,
+ } from '@deepseek-ai/dsh-client-ui-conversation/client'
+ import { SessionSeq } from '@deepseek-ai/dsh-session/types'
+-import type { TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
++import type { CompactionProgressNode, TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
+ import {
+   sameTurnNavigationItem, turnNavigationItem,
+ } from '../src/client/conversation-nodes/turn-navigation.ts'
+@@ -255,7 +255,7 @@ function assistantData(node: AssistantMessageNode): FinalAssistantChatData {
+ }
+ 
+ function settledNode(
+-  node: ConversationNode,
++  node: ConversationNode | CompactionProgressNode,
+   turns: ReadonlyMap<number, TurnLocation>,
+   inferredTurn?: number,
+ ): ChatConversationViewNode {
+@@ -285,7 +285,7 @@ function settledNode(
+ 
+ /** Build the canonical Chat fixture corresponding to one legacy test slice. */
+ export function chatSnapshotFixture(input: {
+-  readonly nodes?: readonly ConversationNode[]
++  readonly nodes?: readonly (ConversationNode | CompactionProgressNode)[]
+   readonly partial?: PartialAssistant | null
+   readonly runningCalls?: readonly RunningToolCall[]
+   readonly turnTimings?: LegacyConversationSlice['turnTimings']
+@@ -295,7 +295,9 @@ export function chatSnapshotFixture(input: {
+   readonly turnUsages?: ReadonlyMap<number, TurnTokenUsage> | undefined
+ } = {}, previous?: ChatSnapshot): ChatSnapshot {
+   const legacy: LegacyConversationSlice = {
+-    nodes: input.nodes ?? EMPTY,
++    // In-progress and failed automatic rows are rendering state, not durable
++    // records: they reach the Chat nodes separately and never enter the slice.
++    nodes: (input.nodes ?? EMPTY).filter((node): node is ConversationNode => !('status' in node)),
+     partial: input.partial ?? null,
+     runningCalls: input.runningCalls ?? EMPTY,
+     turnTimings: input.turnTimings ?? new Map(),
+@@ -336,7 +338,9 @@ export function chatSnapshotFixture(input: {
+       const candidates = sourceSeq === undefined
+         ? []
+         : legacy.nodes.filter((candidate): candidate is CompactionSummaryNode =>
+-          candidate.kind === 'compaction' && candidate.summaryEventSeq === sourceSeq)
++          candidate.kind === 'compaction'
++          && 'summary' in candidate
++          && candidate.summaryEventSeq === sourceSeq)
+       const compaction = candidates.length === 1 ? candidates[0] : undefined
+       if (node.outcome === null || compaction !== undefined) {
+         if (compaction !== undefined) linkedCompactions.add(compaction)
+@@ -350,7 +354,7 @@ export function chatSnapshotFixture(input: {
+         }]
+       }
+     }
+-    if (node.kind === 'compaction' && linkedCompactions.has(node)) return []
++    if (node.kind === 'compaction' && 'summary' in node && linkedCompactions.has(node)) return []
+     const inferredTurn = node.kind === 'tool-result'
+       ? legacy.nodes.slice(0, index).findLast(
+         (candidate): candidate is AssistantMessageNode => candidate.kind === 'assistant',
+@@ -390,6 +394,10 @@ export function chatSnapshotFixture(input: {
+       data: { root: call },
+     })
+   }
++  // Automatic in-progress and failed rows are Chat rendering state: they
++  // settle as standalone Chat nodes without ever joining the legacy slice.
++  const progressNodes = (input.nodes ?? EMPTY).filter((node): node is CompactionProgressNode => 'status' in node)
++  for (const node of progressNodes) nodes.push(settledNode(node, turns))
+   for (const [turnNumber, dataStore] of turnData) {
+     const inTurn = nodes.filter((candidate) => {
+       const location = candidate.location
+diff --git a/packages/client/ui-chat/tests/chat-view.client.spec.tsx b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
+index 2357aced..a40efb49 100644
+--- a/packages/client/ui-chat/tests/chat-view.client.spec.tsx
++++ b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
+@@ -9,7 +9,7 @@ import { useEffect, useMemo } from 'react'
+ import type {
+   AssistantMessageNode, ChatFlowHookContext, ChatFlowOwnerProps, ChatFlowSlotProps,
+   ChatNode, ChatNodeHookContext, ChatNodeOwnerProps, ChatSnapshot,
+-  ChatViewSlotProps, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
++  ChatViewSlotProps, CommandNode, CompactionProgressNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
+   LegacyConversationSlice, ModelRetryNode, StartedToolCall, SteeringMessageNode,
+   ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode,
+   TranscriptViewMode, UserMessageNode,
+@@ -131,7 +131,8 @@ function makeSessionSource(init: Partial<TestSessionSnapshot> = {}) {
+   }
+ }
+ 
+-type ChatSlice = Partial<LegacyConversationSlice> & {
++type ChatSlice = Partial<Omit<LegacyConversationSlice, 'nodes'>> & {
++  readonly nodes?: (ConversationNode | CompactionProgressNode)[]
+   readonly turnUsages?: NonNullable<Parameters<typeof chatSnapshotFixture>[0]>['turnUsages']
+ }
+ type HarnessUpdate = ChatSlice & Partial<TestSessionSnapshot> & { readonly chat?: ChatSnapshot }
+@@ -227,6 +228,11 @@ const compaction = (over: Partial<CompactionSummaryNode> = {}): CompactionSummar
+   ...over,
+ })
+ 
++const compactionProgress = (over: Partial<CompactionProgressNode> = {}): CompactionProgressNode => ({
++  kind: 'compaction', status: 'running', seq: 9, time: 9_000,
++  ...over,
++})
++
+ /** Empty sessions-list hook for the global standard-kit seat. */
+ function emptySessions() {
+   const store = createSnapshotStore<SessionListState>(
+@@ -4273,6 +4279,32 @@ describe('ChatView', () => {
+     expect(view.getByRole('heading', { name: '压缩摘要' })).toBeTruthy()
+   })
+ 
++  it('shows an automatic running row only while the Session is running', () => {
++    const h = makeHarness({ nodes: [compactionProgress()] }, { running: true })
++    const view = render(<h.ChatView {...h.props} />)
++    expect(view.getByText('正在生成摘要…')).toBeTruthy()
++
++    act(() => { h.setSession({ running: false }) })
++    expect(view.queryByText('正在生成摘要…')).toBeNull()
++
++    // A crashed run's leftover row loaded without a live Session renders none.
++    const reload = makeHarness({ nodes: [compactionProgress()] }, { running: false })
++    const reloadView = render(<reload.ChatView {...reload.props} />)
++    expect(reloadView.queryByText('正在生成摘要…')).toBeNull()
++  })
++
++  it('keeps a failed automatic row after the Session settles with its transient reason', () => {
++    const h = makeHarness({ nodes: [compactionProgress({ status: 'failed', message: 'compaction model failed' })] },
++      { running: true })
++    const view = render(<h.ChatView {...h.props} />)
++    expect(view.getByText('compaction model failed')).toBeTruthy()
++    act(() => { h.setSession({ running: false }) })
++    expect(view.getByText('compaction model failed')).toBeTruthy()
++    const fallback = makeHarness({ nodes: [compactionProgress({ status: 'failed' })] }, { running: true })
++    const fallbackView = render(<fallback.ChatView {...fallback.props} />)
++    expect(fallbackView.getByText('摘要生成失败')).toBeTruthy()
++  })
++
+   it('keeps /compact no-history and error settlements on the generic command row', () => {
+     const noHistory = makeHarness({
+       nodes: [command({
+diff --git a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
+index 3823a0db..0cb6fd4d 100644
+--- a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
++++ b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
+@@ -2569,6 +2569,63 @@ describe('built-in conversation node Definitions', () => {
+     expect(node(snapshot(value), 'compaction')).toBeUndefined()
+   })
+ 
++  it('renders a running row while automatic compaction has no landed checkpoint', () => {
++    // Automatic compaction fires while the current turn is still generating:
++    // the turn stays open until the generation settles, then the start arrives.
++    const value = assembler([
++      at(1, 'turn/start', { turn: 1 }),
++      at(2, 'step/start', { turn: 1, step: 1 }),
++      at(3, 'assistant/live-chunk', {
++        turn: 1,
++        step: 1,
++        chunk: { type: 'text-delta', index: 0, text: 'generating' },
++      }),
++      at(10, 'compaction/start', { compactionId: 'running-1', turn: 1 }),
++    ], true)
++
++    const running = node(snapshot(value), 'compaction')
++    expect(running?.data).toMatchObject({ status: 'running' })
++    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(1)
++  })
++
++  it('shows no running row for a legacy session-level compaction start', () => {
++    // The legacy shape carries no Turn: a Turn-end event used to terminate it,
++    // so a session-level start is durable history, never a running row.
++    const value = assembler([
++      at(1, 'turn/start', { turn: 1 }),
++      at(5, 'turn/end', { turn: 1, reason: { kind: 'interrupted' } }),
++      at(10, 'compaction/start', { compactionId: 'reloaded-1', turn: null }),
++    ], true)
++
++    expect(node(snapshot(value), 'compaction')).toBeUndefined()
++    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(0)
++  })
++
++  it('shows no running row for a Turn-anchored start whose Turn closed without a terminal event', () => {
++    // A crashed run leaves its Turn closed with neither a landed checkpoint nor
++    // an error-carrying end: that start is history, not a live run, so a later
++    // generating Turn must not render it as in-progress compaction.
++    const value = assembler([
++      at(1, 'turn/start', { turn: 1 }),
++      at(5, 'turn/end', { turn: 1, reason: { kind: 'interrupted' } }),
++      at(10, 'compaction/start', { compactionId: 'crashed-1', turn: 1 }),
++    ], true)
++
++    expect(node(snapshot(value), 'compaction')).toBeUndefined()
++    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(0)
++  })
++
++  it('renders a failed row when a checkpoint-less run errors on its end event', () => {
++    const value = assembler([
++      at(10, 'compaction/start', { compactionId: 'failed-1', turn: null }),
++      at(11, 'compaction/end', { compactionId: 'failed-1', turn: null, error: 'This operation was aborted' }),
++    ], true)
++
++    const failed = node(snapshot(value), 'compaction')
++    expect(failed?.data).toMatchObject({ status: 'failed' })
++    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(1)
++  })
++
+   it('ignores legacy retry and PTC dispatch events without correlation ids', () => {
+     const value = assembler([
+       at(10, 'llm/retry', {
+diff --git a/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx b/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx
+index fbd21baf..6dc895f4 100644
+--- a/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx
++++ b/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx
+@@ -55,6 +55,11 @@ describe('ReasoningRow', () => {
+   ])('previews the completed paragraph first line for %j', (text, summary) => {
+     const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+       text={text} running usePresentation={useDetailedPresentation} t={t} />)
++    // Live rows with body auto-expand once; close them to read the live
++    // preview. An empty generating row is collapsed from the start.
++    if (text.trim() !== '') {
++      fireEvent.click(view.getByRole('button'))
++    }
+     const root = view.container.querySelector('[data-variant="think"]')!
+     expect(root.querySelector('[class*="summaryText"]')?.textContent).toBe(summary)
+     expect(root.hasAttribute('data-preview')).toBe(summary !== '')
+@@ -95,6 +100,7 @@ describe('ReasoningRow', () => {
+     const usePresentation = bindSnapshotSelector(derivePresentationPolicy(mode, createSnapshotStore<CollapseTiming>('completion')))
+     const props = { text: 'First line\n', usePresentation, t }
+     const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure} {...props} running />)
++    fireEvent.click(view.getByRole('button'))
+     const summary = view.getByText('First line')
+     const root = view.container.querySelector('[data-variant="think"]')!
+     expect(root.hasAttribute('data-preview')).toBe(true)
+@@ -106,30 +112,31 @@ describe('ReasoningRow', () => {
+   it.each([
+     { kind: 'text' as const, text: 'Answer' },
+     { kind: 'tool-call' as const, callId: 'call-1', name: 'read', argsRaw: '{}' },
+-  ])('starts collapsed and preserves manual expansion when $kind arrives', (nextBlock) => {
++  ])('auto-expands with body at first generating render, then respects a manual close when $kind arrives', (nextBlock) => {
+     const reasoning = { kind: 'reasoning' as const, text: 'Inspect the session\nCheck persistence' }
+     const view = render(
+       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+         usePresentation={useDetailedPresentation}
+         t={t} blocks={[reasoning]} streaming renderMessageImages={renderMessageImages} />,
+     )
+-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+     fireEvent.click(view.getByText('思考'))
+     view.rerender(
+       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+         usePresentation={useDetailedPresentation}
+         t={t} blocks={[reasoning, nextBlock]} streaming renderMessageImages={renderMessageImages} />,
+     )
+-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+     view.rerender(
+       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+         usePresentation={useDetailedPresentation}
+         t={t} blocks={[reasoning, nextBlock]} streaming={false} renderMessageImages={renderMessageImages} />,
+     )
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++    expect(view.queryByText(/Check persistence/)).toBeNull()
++    fireEvent.click(view.getByText('思考'))
+     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+     expect(view.getByText(/Check persistence/)).toBeTruthy()
+-    fireEvent.click(view.getByText('思考'))
+-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+   })
+ 
+   it('advances on completed paragraph first lines, then restores the settled first line', () => {
+@@ -143,7 +150,9 @@ describe('ReasoningRow', () => {
+       />,
+     )
+     expect(view.getByText('运行中')).toBeTruthy()
+-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
++    // Auto-expanded with body on first paint; close it to watch the live preview.
++    fireEvent.click(view.getByText('思考'))
+     expect(view.getByText('Newest reasoning tokens').closest('[data-streaming]')?.getAttribute('data-streaming'))
+       .toBe('true')
+ 
+@@ -230,12 +239,18 @@ describe('ReasoningRow', () => {
+       />,
+     )
+ 
+-    expect(view.getByText('Comparing checkout and merge bases')).toBeTruthy()
+-    expect(view.queryByText('**Comparing checkout and merge bases**')).toBeNull()
+-
++    const firstNode = view.getByText('Comparing checkout and merge bases')
++    expect(firstNode.tagName).toBe(streaming ? 'STRONG' : 'SPAN')
++    if (streaming) {
++      expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
++    } else {
++      expect(view.queryByText('**Comparing checkout and merge bases**')).toBeNull()
++    }
+     fireEvent.click(view.getByText('思考'))
+-    expect(view.getByText('Comparing checkout and merge bases').tagName).toBe('STRONG')
+-    expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
++    expect(view.getByText('Comparing checkout and merge bases').tagName).toBe(streaming ? 'SPAN' : 'STRONG')
++    if (!streaming) {
++      expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
++    }
+   })
+ 
+   it('keeps heading syntax in the collapsed summary and renders compact headings when expanded', () => {
+@@ -276,7 +291,7 @@ describe('ReasoningRow', () => {
+         renderMessageImages={renderMessageImages}
+       />,
+     )
+-    fireEvent.click(view.getByText('思考'))
++    // Live body auto-expands the streaming tail on the first paint.
+     const heading = view.getByRole('heading', { name: 'Investigation' })
+     const emphasis = view.getByText('Check persistence')
+     const text = first + Array.from({ length: 8 }, (_, index) => `Paragraph ${index}.`).join('\n\n')
+@@ -333,4 +348,54 @@ describe('ReasoningRow', () => {
+       ),
+     ).not.toBeNull()
+   })
++
++  it('auto-expands once when a streaming block first produces body, then respects a manual close', () => {
++    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text="" running usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++    // The first reasoning body arrives: the row auto-expands exactly once.
++    view.rerender(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text={'First reasoning body'} running usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
++    // Further reasoning diffs keep the disclosure open; its state is not reset.
++    view.rerender(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text={'First reasoning body\nMore reasoning'} running usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
++    // A manual close during generation is never overridden by new body.
++    fireEvent.click(view.getByRole('button'))
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++    view.rerender(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text={'First reasoning body\nEven more reasoning'} running usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++  })
++
++  it('does not auto-expand a settled block that already carries body when it loads', () => {
++    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text={'Inspected the session'} running={false} usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
++  })
++
++  it('renders no Thinking row for a settled reasoning block that carries no body', () => {
++    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text="" running={false} usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.container.querySelector('[data-variant="think"]')).toBeNull()
++  })
++
++  it('renders an orphaned running tail with no body as no row once the Session settles', () => {
++    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text="" running generationLive={false} usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.container.querySelector('[data-variant="think"]')).toBeNull()
++  })
++
++  it('renders an orphaned streaming tail as settled once the Session stops generating', () => {
++    // Same streaming tail, settled Session: live chrome disappears and the
++    // whole text reads as the settled summary preview instead of the latest
++    // completed paragraph first line.
++    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
++      text={'First line\n\nLatest completed paragraph'} running generationLive={false}
++      usePresentation={useDetailedPresentation} t={t} />)
++    expect(view.getByText('First line')).toBeTruthy()
++    expect(view.getByText('First line').closest('[data-streaming]')).toBeNull()
++    expect(view.queryByText('Latest completed paragraph')).toBeNull()
++  })
+ })

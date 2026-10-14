@@ -1,0 +1,3 @@
+# Keep the distributed patch LF-normalized in every checkout so `git apply`
+# sees the same bytes on every host.
+patches/*.patch -text

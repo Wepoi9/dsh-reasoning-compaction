@@ -37,7 +37,9 @@ title and summary, pinned as two matches inside that render's own container
 - After `git apply`, `git diff --exit-code 9a304e85` → exit 0: the applied tree
   is identical to the extension commit `9a304e85` recorded on top of the tag.
 - The patch is LF-normalized and carries no README appendix; distribution
-  documentation lives in this repository's README only.
+  documentation lives in this repository's README only. `.gitattributes` pins
+  the patch bytes (`-text`) so every checkout ships the same LF patch the
+  recording host applied.
 
 ## Web e2e — recorded 2026-10-14 on this host, not rerun for the title revision
 

@@ -12,17 +12,21 @@ shipped as a patch overlay instead of a forked tree.
   (`reasoningEffort`), and a `none`/minimal effort returns no reasoning body at
   all, so set it to `high` when testing this feature.
 - Automatic compaction progress renders as a display-only `running`/`failed`
-  row: the row is built only for a Turn-anchored start whose Turn has not
-  closed, and only while the session is running, so an interrupted run left
-  behind by a closed Turn never shows as in-progress during a later Turn.
-  Reloads of unfinished history stay free of stale running rows. `/compact`
-  markers and Trajectory views keep their existing behaviour.
+  row titled by status — a compacting/summarizing title while running and a
+  summary-generation-failure title once failed — so a row never carries the
+  completed label while its summary is missing; completed and manual
+  `/compact` rows keep the existing shared title and the Trajectory views keep
+  their existing behaviour. The row is built only for a Turn-anchored start
+  whose Turn has not closed, and only while the session is running, so an
+  interrupted run left behind by a closed Turn never shows as in-progress
+  during a later Turn. Reloads of unfinished history stay free of stale
+  running rows.
 
 Supported upstream version: tag `dsh-v0.2.1-alpha.2` (commit `d7432673`).
-`patches/dsh-v0.2.1-alpha.2.patch` reproduces the fixed tree: after `git apply`
-on that tag checkout, `git diff --exit-code bd0cf8e7` against this repository's
-extension chain tip is empty. Only the client chat UI changed; the server-side
-compaction protocol and durable records are unchanged.
+`patches/dsh-v0.2.1-alpha.2.patch` reproduces the fixed tree: it passes
+`git apply --check` and applies cleanly on that tag checkout. Only the client
+chat UI changed; the server-side compaction protocol and durable records are
+unchanged.
 
 ## Apply
 

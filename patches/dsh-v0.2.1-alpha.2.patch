@@ -1,43 +1,3 @@
-diff --git a/README.md b/README.md
-index 7941e30f..3fd4d9de 100644
---- a/README.md
-+++ b/README.md
-@@ -75,3 +75,35 @@ For agents, follow [AGENTS.md](AGENTS.md).
- [MIT](LICENSE)
- 
- Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-+
-+## Changes in this tree
-+
-+This tree is based on upstream DeepSeek Harness tag `dsh-v0.2.1-alpha.2`
-+(commit `d7432673`). Only the client chat UI changed; the server-side
-+compaction protocol and durable records are unchanged.
-+
-+- Reasoning blocks auto-expand once at the first generating render that has
-+  body text (DSH batches reasoning diffs, so body text can exist at first
-+  paint); a manual close is then respected for the rest of the generation.
-+  If no reasoning body ever appears, check the model request's reasoning
-+  effort first: it comes from the model's default effort or the effort
-+  selected in the model picker (`reasoningEffort`), and a `none`/minimal
-+  effort returns no reasoning body at all, so set it to `high` when testing
-+  this feature.
-+- Automatic compaction progress renders as a display-only `running`/`failed`
-+  row: the row is built only for a Turn-anchored start whose Turn has not
-+  closed, and only while the session is running, so an interrupted run left
-+  behind by a closed Turn never shows as in-progress during a later Turn.
-+  Reloads of unfinished history stay free of stale running rows. `/compact`
-+  markers and Trajectory views keep their existing behaviour.
-+- Supported upstream version: `dsh-v0.2.1-alpha.2`. Build this tree with:
-+
-+  ```sh
-+  corepack enable
-+  pnpm install --frozen-lockfile
-+  pnpm run build
-+  ```
-+
-+  The repository pins `pnpm@11.28.5` via `packageManager` and uses `workspace:*`
-+  dependencies, so `npm install` cannot resolve the workspace; run the app
-+  after building with `pnpm dsh web`.
 diff --git a/apps/web/tests/lifecycle-chrome.e2e.ts b/apps/web/tests/lifecycle-chrome.e2e.ts
 index a9226b7f..b665a36b 100644
 --- a/apps/web/tests/lifecycle-chrome.e2e.ts
@@ -151,7 +111,7 @@ index 4bc1947d..cc1cb7cf 100644
    ])
    if (routedNode === undefined || owner === null) return null
 diff --git a/packages/client/ui-chat/src/client/chat/CompactionItem.tsx b/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
-index 006b5705..058d5a6e 100644
+index 006b5705..14e896c0 100644
 --- a/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
 +++ b/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
 @@ -10,11 +10,12 @@ import {
@@ -168,13 +128,16 @@ index 006b5705..058d5a6e 100644
    /** Optional command title for a manual compaction folded into this marker. */
    title?: string
    /** Command settlement text used when structured compaction counts are unavailable. */
-@@ -36,6 +37,25 @@ export const CompactionItem = memo(function CompactionItem({
+@@ -36,6 +37,28 @@ export const CompactionItem = memo(function CompactionItem({
  }: CompactionItemProps) {
    const [expanded, setExpanded] = useState(false)
    const labels = useMemo(() => markdownLabels(t), [t])
 +  // A running or failed automatic row carries no summary yet; render one plain
 +  // label row so a start-without-checkpoint never leaves a blank summary row.
 +  if ('status' in node) {
++    const statusTitle = node.status === 'running'
++      ? t('message.compaction.running')
++      : t('message.compaction.failed')
 +    const statusSummary = node.status === 'running'
 +      ? t('message.compaction.summarizing')
 +      : node.message ?? t('message.compaction.failed')
@@ -185,7 +148,7 @@ index 006b5705..058d5a6e 100644
 +            <IconApiOutlineRegular />
 +          </span>
 +        </span>
-+        <span className={css.compactionTitle}>{title ?? t('message.compaction')}</span>
++        <span className={css.compactionTitle}>{title ?? statusTitle}</span>
 +        <span className={css.compactionSep} aria-hidden />
 +        <span className={css.compactionSummary}>{statusSummary}</span>
 +      </div>
@@ -673,7 +636,7 @@ index 1a0ed20d..f71bf1bd 100644
      const inTurn = nodes.filter((candidate) => {
        const location = candidate.location
 diff --git a/packages/client/ui-chat/tests/chat-view.client.spec.tsx b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
-index 2357aced..a40efb49 100644
+index 2357aced..ac4f7a57 100644
 --- a/packages/client/ui-chat/tests/chat-view.client.spec.tsx
 +++ b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
 @@ -9,7 +9,7 @@ import { useEffect, useMemo } from 'react'
@@ -707,17 +670,19 @@ index 2357aced..a40efb49 100644
  /** Empty sessions-list hook for the global standard-kit seat. */
  function emptySessions() {
    const store = createSnapshotStore<SessionListState>(
-@@ -4273,6 +4279,32 @@ describe('ChatView', () => {
+@@ -4273,6 +4279,35 @@ describe('ChatView', () => {
      expect(view.getByRole('heading', { name: '压缩摘要' })).toBeTruthy()
    })
  
 +  it('shows an automatic running row only while the Session is running', () => {
 +    const h = makeHarness({ nodes: [compactionProgress()] }, { running: true })
 +    const view = render(<h.ChatView {...h.props} />)
++    expect(view.getByText('正在压缩…')).toBeTruthy()
 +    expect(view.getByText('正在生成摘要…')).toBeTruthy()
 +
 +    act(() => { h.setSession({ running: false }) })
 +    expect(view.queryByText('正在生成摘要…')).toBeNull()
++    expect(view.queryByText('正在压缩…')).toBeNull()
 +
 +    // A crashed run's leftover row loaded without a live Session renders none.
 +    const reload = makeHarness({ nodes: [compactionProgress()] }, { running: false })
@@ -729,12 +694,13 @@ index 2357aced..a40efb49 100644
 +    const h = makeHarness({ nodes: [compactionProgress({ status: 'failed', message: 'compaction model failed' })] },
 +      { running: true })
 +    const view = render(<h.ChatView {...h.props} />)
++    expect(view.getByText('摘要生成失败')).toBeTruthy()
 +    expect(view.getByText('compaction model failed')).toBeTruthy()
 +    act(() => { h.setSession({ running: false }) })
 +    expect(view.getByText('compaction model failed')).toBeTruthy()
 +    const fallback = makeHarness({ nodes: [compactionProgress({ status: 'failed' })] }, { running: true })
 +    const fallbackView = render(<fallback.ChatView {...fallback.props} />)
-+    expect(fallbackView.getByText('摘要生成失败')).toBeTruthy()
++    expect(within(fallbackView.container).getAllByText('摘要生成失败')).toHaveLength(2)
 +  })
 +
    it('keeps /compact no-history and error settlements on the generic command row', () => {

@@ -5,5 +5,25 @@ CLAUDE.local.md
 .idea
 .DS_Store
 
-# Local environment files
+# Local environment files and credentials
 .env
+.env.*
+.npmrc
+
+# Logs and coverage output
+*.log
+pnpm-debug.log*
+logs/
+coverage/
+
+# Build output from pnpm install and pnpm run build
+node_modules/
+dist/
+lib/
+*.tsbuildinfo
+.cordistr/
+.pnpm-store/
+
+# Local DSH runtime state written under a checkout
+.sessions/
+.storages/

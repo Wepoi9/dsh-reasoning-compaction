@@ -20,7 +20,7 @@ shipped as a patch overlay instead of a forked tree.
 
 Supported upstream version: tag `dsh-v0.2.1-alpha.3` (commit `2fbf4359b8`).
 `patches/dsh-v0.2.1-alpha.3.patch` reproduces the fixed tree: after `git apply`
-on that tag checkout, `git diff --exit-code cb9ed47b4e` against this
+on that tag checkout, `git diff --exit-code d03d9c7fb4` against this
 repository's `alpha3-overlay` branch tip is empty. Only the client chat UI
 changed; the server-side compaction protocol and durable records are unchanged.
 The source of the patch lives on the `alpha3-overlay` branch of this
@@ -65,9 +65,10 @@ project documentation lives in the upstream repository and at
 patch-application, and real-Chromium web-e2e results with each failure's
 attribution. The web-e2e failures itemized there are host-environment items
 (missing WebKit executable, shared skills catalog injected into the slash-menu
-candidates, a Windows path separator in one golden, one replayed-stream
-timeout), not UI regressions; failures outside that itemized list are recorded
-there as unattributed, not as confirmed environment-only. The hero
+candidates and the persisted-replay snapshot, a Windows path separator in one
+golden, one replayed-stream timeout), not UI regressions; the focused lane was
+rerun in full on the final tree under unified conditions and produced no
+failure outside that itemized list. The hero
 first-prompt spec is aligned with the auto-expand behaviour and passes on the
 alpha.3 lane.
 

@@ -1,43 +1,3 @@
-diff --git a/README.md b/README.md
-index 7941e30f7b..746351ded8 100644
---- a/README.md
-+++ b/README.md
-@@ -75,3 +75,35 @@ For agents, follow [AGENTS.md](AGENTS.md).
- [MIT](LICENSE)
- 
- Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-+
-+## Changes in this tree
-+
-+This tree is based on upstream DeepSeek Harness tag `dsh-v0.2.1-alpha.3`
-+(commit `2fbf4359b8`). Only the client chat UI changed; the server-side
-+compaction protocol and durable records are unchanged.
-+
-+- Reasoning blocks auto-expand once at the first generating render that has
-+  body text (DSH batches reasoning diffs, so body text can exist at first
-+  paint); a manual close is then respected for the rest of the generation.
-+  If no reasoning body ever appears, check the model request's reasoning
-+  effort first: it comes from the model's default effort or the effort
-+  selected in the model picker (`reasoningEffort`), and a `none`/minimal
-+  effort returns no reasoning body at all, so set it to `high` when testing
-+  this feature.
-+- Automatic compaction progress renders as a display-only `running`/`failed`
-+  row: the row is built only for a Turn-anchored start whose Turn has not
-+  closed, and only while the session is running, so an interrupted run left
-+  behind by a closed Turn never shows as in-progress during a later Turn.
-+  Reloads of unfinished history stay free of stale running rows. `/compact`
-+  markers and Trajectory views keep their existing behaviour.
-+- Supported upstream version: `dsh-v0.2.1-alpha.3`. Build this tree with:
-+
-+  ```sh
-+  corepack enable
-+  pnpm install --frozen-lockfile
-+  pnpm run build
-+  ```
-+
-+  The repository pins `pnpm@11.28.5` via `packageManager` and uses `workspace:*`
-+  dependencies, so `npm install` cannot resolve the workspace; run the app
-+  after building with `pnpm dsh web`.
 diff --git a/apps/web/tests/lifecycle-chrome.e2e.ts b/apps/web/tests/lifecycle-chrome.e2e.ts
 index a9226b7fb7..b665a36bcc 100644
 --- a/apps/web/tests/lifecycle-chrome.e2e.ts
@@ -396,25 +356,11 @@ index 933ae8f760..48d16a2697 100644
      case 'assistant-step': {
        const data = node.data
        if (data.status === 'running') {
-diff --git a/packages/client/ui-chat/src/client/conversation-nodes/command.ts b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
-index a52b877552..d4a3fc440b 100644
---- a/packages/client/ui-chat/src/client/conversation-nodes/command.ts
-+++ b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
-@@ -28,7 +28,8 @@ interface CommandState {
-   readonly checkpoint?: ConversationMatch
- }
- 
--interface CompactionEvidence {
-+/** Summary and checkpoint evidence observed on the command that ran compaction. */
-+export interface CompactionEvidence {
-   readonly summary?: ConversationMatch
-   readonly checkpoint?: ConversationMatch
- }
 diff --git a/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts b/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
-index 9612f08741..0d6c1d219a 100644
+index 9612f08741..6fbe98e64c 100644
 --- a/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
 +++ b/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
-@@ -1,58 +1,136 @@
+@@ -1,33 +1,68 @@
 +// Automatic compaction has no owning slash Command; its shared compaction
 +// evidence is adopted as Definition-owned State beside the Command Definition.
 +
@@ -489,29 +435,7 @@ index 9612f08741..0d6c1d219a 100644
  export const compactionDefinition: ConversationNodeDefinition<CompactionState> = {
    kind: 'compaction',
    target: 'chat',
-   match: (event) => {
-     const checkpoint = compactSource(event)
--    if (checkpoint !== undefined && checkpoint.sourceCommandId === undefined) {
--      return { id: checkpoint.compactionId, role: 'update' }
-+    if (checkpoint !== undefined) {
-+      return checkpoint.sourceCommandId === undefined
-+        ? { id: String(checkpoint.compactionId), role: 'update' }
-+        : null
-     }
-     if (event.type === 'compaction/start'
-       || event.type === 'compaction/summary'
-       || event.type === 'compaction/end') {
--      if (event.data.sourceCommandId !== undefined) return null
--      const compactionId: unknown = event.data.compactionId
--      if (typeof compactionId !== 'string' || compactionId === '') return null
-+      const compactionId = event.data.compactionId
-+      if (compactionId === undefined
-+        || event.data.sourceCommandId !== undefined
-+        || typeof compactionId !== 'string') {
-+        return null
-+      }
-       return { id: compactionId, role: event.type === 'compaction/start' ? 'start' : 'update' }
-     }
+@@ -47,12 +82,50 @@ export const compactionDefinition: ConversationNodeDefinition<CompactionState> =
      return null
    },
    start: () => ({}),
@@ -524,13 +448,13 @@ index 9612f08741..0d6c1d219a 100644
 -    if (state.checkpoint === undefined) return null
 -    const marker = compactSummary(state.summary, state.checkpoint)
 -    return chatNode(context, 'compaction', marker.seq, marker)
-+    const marker = state?.checkpoint === undefined
++    const marker = state.checkpoint === undefined
 +      ? undefined
-+      : compactSummary(state?.summary, state?.checkpoint)
++      : compactSummary(state.summary, state.checkpoint)
 +    if (marker !== undefined) {
 +      return chatNode(context, 'compaction', marker.seq, marker)
 +    }
-+    const end = state?.end
++    const end = state.end
 +    const endPayload = end?.event.data as { readonly error?: unknown } | undefined
 +    // A landed checkpoint owns the completed marker above; an error without one
 +    // ends the run as one failed row, and an interruption leaves no row at all.
@@ -552,7 +476,7 @@ index 9612f08741..0d6c1d219a 100644
 +    // Turn already closed by a durable turn/end is history, not a live run.
 +    // The renderer additionally hides the row while the Session is not
 +    // running.
-+    if (end === undefined && start !== undefined && state?.checkpoint === undefined
++    if (end === undefined && start !== undefined && state.checkpoint === undefined
 +      && startCarriesTurn(start)) {
 +      const data: CompactionProgressNode = {
 +        kind: 'compaction',

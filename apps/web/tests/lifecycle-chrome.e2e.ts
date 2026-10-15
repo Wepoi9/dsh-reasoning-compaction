@@ -340,10 +340,10 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
         if (MODE !== 'record') {
           const thinking = page.locator('[data-variant="think"][data-state="running"]')
           await expandOwningTurnProcess(page, thinking)
-          await expect.poll(() => thinking.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+          await expect.poll(() => thinking.getByRole('button').getAttribute('aria-expanded')).toBe('true')
           await reasoningComplete.promise
           expect(await thinking.getAttribute('data-preview')).toBeNull()
-          expect(await thinking.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+          expect(await thinking.getByRole('button').getAttribute('aria-expanded')).toBe('true')
           expect(await thinking.locator('[data-streaming]:not([inert] *)').isVisible()).toBe(false)
         }
         observedReasoning.resolve(undefined)

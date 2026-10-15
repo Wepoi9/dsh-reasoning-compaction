@@ -335,8 +335,13 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
 })
 
 /** Automatic compaction keyed Chat renderer. */
-export const CompactionNodeView = memo(function CompactionNodeView({ node, t }: ChatNodeViewProps<'compaction'>) {
-  return <CompactionItem node={node.data} t={t} />
+export const CompactionNodeView = memo(function CompactionNodeView({ node, running, t }: ChatNodeViewProps<'compaction'>) {
+  const data = node.data
+  // An automatic running row is live chrome: hidden here while the Session is
+  // not running (reload or settled run); the failed row and settled summaries
+  // are rendering state the owner keeps, and are never gated.
+  if ('status' in data && data.status === 'running' && !running) return null
+  return <CompactionItem node={data} t={t} />
 })
 
 /** Correlated retry-chain keyed Chat renderer. */

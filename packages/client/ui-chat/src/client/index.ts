@@ -23,7 +23,7 @@ export type {
   TurnNavigationItem, UnknownSurfaceNode, UserMessageNode,
 } from './contract/snapshot.ts'
 export type {
-  AssistantChatData, ChatConversationViewNode, ChatNode, ChatNodeKind,
+  AssistantChatData, ChatConversationViewNode, ChatNode, ChatNodeKind, CompactionProgressNode,
   FinalAssistantChatData, ManualCompactionChatData, RetryChatData, ToolChatData,
   TurnProcessChatData, TurnTailChatData,
 } from './contract/chat-nodes.ts'

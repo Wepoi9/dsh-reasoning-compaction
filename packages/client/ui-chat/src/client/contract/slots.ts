@@ -218,6 +218,13 @@ export interface ChatNodeOwnerProps {
   /** Session-authorized image loader supplied by the Chat view. */
   loadImage: MessageImageLoader
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
+  /**
+   * Whether the owning Session is generating right now. Live generation
+   * chrome — the automatic-compaction running row and the streaming
+   * Thinking row — is shown only while this holds; settled rows are not
+   * gated. An omitted owner reads as not generating (fail-closed).
+   */
+  running?: boolean | undefined
   /** Turn-process state when this Node belongs to a projected Turn. */
   turnProcess?: TurnProcessOwnerProps | undefined
 }

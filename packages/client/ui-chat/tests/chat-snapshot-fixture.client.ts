@@ -9,7 +9,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { TurnEndReason } from '@deepseek-ai/dsh-session/types'
-import type { TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
+import type { CompactionProgressNode, TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
 import {
   sameTurnNavigationItem, turnNavigationItem,
 } from '../src/client/conversation-nodes/turn-navigation.ts'
@@ -271,7 +271,7 @@ function assistantData(node: AssistantMessageNode): FinalAssistantChatData {
 }
 
 function settledNode(
-  node: ConversationNode,
+  node: ConversationNode | CompactionProgressNode,
   turns: ReadonlyMap<number, TurnLocation>,
   inferredTurn?: number,
 ): ChatConversationViewNode {
@@ -302,7 +302,7 @@ function settledNode(
 
 /** Build the canonical Chat fixture corresponding to one legacy test slice. */
 export function chatSnapshotFixture(input: {
-  readonly nodes?: readonly ConversationNode[]
+  readonly nodes?: readonly (ConversationNode | CompactionProgressNode)[]
   readonly partial?: PartialAssistant | null
   readonly runningCalls?: readonly RunningToolCall[]
   readonly turnTimings?: LegacyConversationSlice['turnTimings']
@@ -314,7 +314,9 @@ export function chatSnapshotFixture(input: {
   readonly turnUsages?: ReadonlyMap<number, TurnTokenUsage> | undefined
 } = {}, previous?: ChatSnapshot): ChatSnapshot {
   const legacy: LegacyConversationSlice = {
-    nodes: input.nodes ?? EMPTY,
+    // In-progress and failed automatic rows are rendering state, not durable
+    // records: they reach the Chat nodes separately and never enter the slice.
+    nodes: (input.nodes ?? EMPTY).filter((node): node is ConversationNode => !('status' in node)),
     partial: input.partial ?? null,
     runningCalls: input.runningCalls ?? EMPTY,
     turnTimings: input.turnTimings ?? new Map(),
@@ -355,7 +357,9 @@ export function chatSnapshotFixture(input: {
       const candidates = sourceSeq === undefined
         ? []
         : legacy.nodes.filter((candidate): candidate is CompactionSummaryNode =>
-          candidate.kind === 'compaction' && candidate.summaryEventSeq === sourceSeq)
+          candidate.kind === 'compaction'
+          && 'summary' in candidate
+          && candidate.summaryEventSeq === sourceSeq)
       const compaction = candidates.length === 1 ? candidates[0] : undefined
       if (node.outcome === null || compaction !== undefined) {
         if (compaction !== undefined) linkedCompactions.add(compaction)
@@ -369,7 +373,7 @@ export function chatSnapshotFixture(input: {
         }]
       }
     }
-    if (node.kind === 'compaction' && linkedCompactions.has(node)) return []
+    if (node.kind === 'compaction' && 'summary' in node && linkedCompactions.has(node)) return []
     const inferredTurn = node.kind === 'tool-result'
       ? legacy.nodes.slice(0, index).findLast(
         (candidate): candidate is AssistantMessageNode => candidate.kind === 'assistant',
@@ -409,6 +413,10 @@ export function chatSnapshotFixture(input: {
       data: { root: call },
     })
   }
+  // Automatic in-progress and failed rows are Chat rendering state: they
+  // settle as standalone Chat nodes without ever joining the legacy slice.
+  const progressNodes = (input.nodes ?? EMPTY).filter((node): node is CompactionProgressNode => 'status' in node)
+  for (const node of progressNodes) nodes.push(settledNode(node, turns))
   for (const [turnNumber, dataStore] of turnData) {
     const inTurn = nodes.filter((candidate) => {
       const location = candidate.location

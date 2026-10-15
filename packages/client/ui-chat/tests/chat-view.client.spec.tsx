@@ -10,7 +10,7 @@ import { useEffect, useMemo } from 'react'
 import type {
   AssistantMessageNode, ChatFlowHookContext, ChatFlowOwnerProps, ChatFlowSlotProps,
   ChatNode, ChatNodeHookContext, ChatNodeOwnerProps, ChatSnapshot,
-  ChatViewSlotProps, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
+  ChatViewSlotProps, CommandNode, CompactionProgressNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
   LegacyConversationSlice, ModelRetryNode, StartedToolCall, SteeringMessageNode,
   ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode,
   TranscriptViewMode, UserContentInput, UserMessageNode,
@@ -133,7 +133,8 @@ function makeSessionSource(init: Partial<TestSessionSnapshot> = {}) {
   }
 }
 
-type ChatSlice = Partial<LegacyConversationSlice> & {
+type ChatSlice = Partial<Omit<LegacyConversationSlice, 'nodes'>> & {
+  readonly nodes?: (ConversationNode | CompactionProgressNode)[]
   readonly turnUsages?: NonNullable<Parameters<typeof chatSnapshotFixture>[0]>['turnUsages']
 }
 type HarnessUpdate = ChatSlice & Partial<TestSessionSnapshot> & { readonly chat?: ChatSnapshot }
@@ -226,6 +227,11 @@ const compaction = (over: Partial<CompactionSummaryNode> = {}): CompactionSummar
   summaryEventSeq: 7,
   shadowedItemCount: 16,
   shadowedTokenCount: 11_309,
+  ...over,
+})
+
+const compactionProgress = (over: Partial<CompactionProgressNode> = {}): CompactionProgressNode => ({
+  kind: 'compaction', status: 'running', seq: 9, time: 9_000,
   ...over,
 })
 
@@ -4362,6 +4368,32 @@ describe('ChatView', () => {
     expect(row.getAttribute('aria-expanded')).toBe('true')
     expect(row.querySelector('[data-compaction-disclosure="expanded"]')).not.toBeNull()
     expect(view.getByRole('heading', { name: '压缩摘要' })).toBeTruthy()
+  })
+
+  it('shows an automatic running row only while the Session is running', () => {
+    const h = makeHarness({ nodes: [compactionProgress()] }, { running: true })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByText('正在生成摘要…')).toBeTruthy()
+
+    act(() => { h.setSession({ running: false }) })
+    expect(view.queryByText('正在生成摘要…')).toBeNull()
+
+    // A crashed run's leftover row loaded without a live Session renders none.
+    const reload = makeHarness({ nodes: [compactionProgress()] }, { running: false })
+    const reloadView = render(<reload.ChatView {...reload.props} />)
+    expect(reloadView.queryByText('正在生成摘要…')).toBeNull()
+  })
+
+  it('keeps a failed automatic row after the Session settles with its transient reason', () => {
+    const h = makeHarness({ nodes: [compactionProgress({ status: 'failed', message: 'compaction model failed' })] },
+      { running: true })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByText('compaction model failed')).toBeTruthy()
+    act(() => { h.setSession({ running: false }) })
+    expect(view.getByText('compaction model failed')).toBeTruthy()
+    const fallback = makeHarness({ nodes: [compactionProgress({ status: 'failed' })] }, { running: true })
+    const fallbackView = render(<fallback.ChatView {...fallback.props} />)
+    expect(fallbackView.getByText('摘要生成失败')).toBeTruthy()
   })
 
   it('keeps /compact no-history and error settlements on the generic command row', () => {

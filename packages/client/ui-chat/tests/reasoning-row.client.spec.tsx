@@ -78,9 +78,12 @@ describe('AssistantMarkdown reasoning blocks', () => {
     const tailToggle = toggles[1]!
     const tailRow = tailToggle.closest('[data-variant="think"]')
     expect(tailRow?.getAttribute('data-state')).toBe('running')
-    expect(view.queryByText(tail.text)).toBeNull()
-    fireEvent.click(tailToggle)
+    // The extension auto-expands a live tail as soon as it carries text.
+    expect(tailToggle.getAttribute('aria-expanded')).toBe('true')
     expect(view.getByText(tail.text)).toBeTruthy()
+    expect(earlierToggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(tailToggle)
+    expect(tailToggle.getAttribute('aria-expanded')).toBe('false')
     expect(earlierToggle.getAttribute('aria-expanded')).toBe('true')
 
     view.rerender(<AssistantMarkdown {...props} blocks={blocks} streaming={false} />)
@@ -90,10 +93,10 @@ describe('AssistantMarkdown reasoning blocks', () => {
     expect(settledToggles[1]).toBe(tailToggle)
     expect(view.getByText('Earlier body')).toBe(earlierBody)
     expect(tailRow?.getAttribute('data-state')).toBe('ok')
-    expect(tailToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(tailToggle.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(tailToggle)
     expect(earlierToggle.getAttribute('aria-expanded')).toBe('true')
-    expect(tailToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(tailToggle.getAttribute('aria-expanded')).toBe('true')
   })
 
   it.each(['Partial thought', '', ' \t\r\n'])('retains the stopped marker with blank reasoning around %j', (text) => {
@@ -167,6 +170,11 @@ describe('ReasoningRow', () => {
   ])('previews the completed paragraph first line for %j', (text, summary) => {
     const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
       text={text} running usePresentation={useDetailedPresentation} t={t} />)
+    // Live rows with body auto-expand once; close them to read the live
+    // preview. An empty generating row is collapsed from the start.
+    if (text.trim() !== '') {
+      fireEvent.click(view.getByRole('button'))
+    }
     const root = view.container.querySelector('[data-variant="think"]')!
     expect(root.querySelector('[class*="summaryText"]')?.textContent).toBe(summary)
     expect(root.hasAttribute('data-preview')).toBe(summary !== '')
@@ -207,6 +215,7 @@ describe('ReasoningRow', () => {
     const usePresentation = bindSnapshotSelector(derivePresentationPolicy(mode, createSnapshotStore<CollapseTiming>('completion')))
     const props = { text: 'First line\n', usePresentation, t }
     const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure} {...props} running />)
+    fireEvent.click(view.getByRole('button'))
     const summary = view.getByText('First line')
     const root = view.container.querySelector('[data-variant="think"]')!
     expect(root.hasAttribute('data-preview')).toBe(true)
@@ -218,30 +227,31 @@ describe('ReasoningRow', () => {
   it.each([
     { kind: 'text' as const, text: 'Answer' },
     { kind: 'tool-call' as const, callId: 'call-1', name: 'read', argsRaw: '{}' },
-  ])('starts collapsed and preserves manual expansion when $kind arrives', (nextBlock) => {
+  ])('auto-expands with body at first generating render, then respects a manual close when $kind arrives', (nextBlock) => {
     const reasoning = { kind: 'reasoning' as const, text: 'Inspect the session\nCheck persistence' }
     const view = render(
       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}
         t={t} blocks={[reasoning]} streaming loadImage={unusedImageLoader} />,
     )
-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(view.getByText('思考'))
     view.rerender(
       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}
         t={t} blocks={[reasoning, nextBlock]} streaming loadImage={unusedImageLoader} />,
     )
-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
     view.rerender(
       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}
         t={t} blocks={[reasoning, nextBlock]} streaming={false} loadImage={unusedImageLoader} />,
     )
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+    expect(view.queryByText(/Check persistence/)).toBeNull()
+    fireEvent.click(view.getByText('思考'))
     expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
     expect(view.getByText(/Check persistence/)).toBeTruthy()
-    fireEvent.click(view.getByText('思考'))
-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
   })
 
   it('advances on completed paragraph first lines, then restores the settled first line', () => {
@@ -255,7 +265,9 @@ describe('ReasoningRow', () => {
       />,
     )
     expect(view.getByText('运行中')).toBeTruthy()
-    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    // Auto-expanded with body on first paint; close it to watch the live preview.
+    fireEvent.click(view.getByText('思考'))
     expect(view.getByText('Newest reasoning tokens').closest('[data-streaming]')?.getAttribute('data-streaming'))
       .toBe('true')
 
@@ -342,12 +354,18 @@ describe('ReasoningRow', () => {
       />,
     )
 
-    expect(view.getByText('Comparing checkout and merge bases')).toBeTruthy()
-    expect(view.queryByText('**Comparing checkout and merge bases**')).toBeNull()
-
+    const firstNode = view.getByText('Comparing checkout and merge bases')
+    expect(firstNode.tagName).toBe(streaming ? 'STRONG' : 'SPAN')
+    if (streaming) {
+      expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
+    } else {
+      expect(view.queryByText('**Comparing checkout and merge bases**')).toBeNull()
+    }
     fireEvent.click(view.getByText('思考'))
-    expect(view.getByText('Comparing checkout and merge bases').tagName).toBe('STRONG')
-    expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
+    expect(view.getByText('Comparing checkout and merge bases').tagName).toBe(streaming ? 'SPAN' : 'STRONG')
+    if (!streaming) {
+      expect(view.container.querySelector('[class*="thinkBody"]')?.textContent).not.toContain('**')
+    }
   })
 
   it('keeps heading syntax in the collapsed summary and renders compact headings when expanded', () => {
@@ -388,7 +406,7 @@ describe('ReasoningRow', () => {
         loadImage={unusedImageLoader}
       />,
     )
-    fireEvent.click(view.getByText('思考'))
+    // Live body auto-expands the streaming tail on the first paint.
     const heading = view.getByRole('heading', { name: 'Investigation' })
     const emphasis = view.getByText('Check persistence')
     const text = first + Array.from({ length: 8 }, (_, index) => `Paragraph ${index}.`).join('\n\n')
@@ -444,5 +462,55 @@ describe('ReasoningRow', () => {
         '[data-variant="think"][data-expanded] [data-open] [data-disclosure-header]',
       ),
     ).not.toBeNull()
+  })
+
+  it('auto-expands once when a streaming block first produces body, then respects a manual close', () => {
+    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text="" running usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+    // The first reasoning body arrives: the row auto-expands exactly once.
+    view.rerender(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text={'First reasoning body'} running usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    // Further reasoning diffs keep the disclosure open; its state is not reset.
+    view.rerender(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text={'First reasoning body\nMore reasoning'} running usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    // A manual close during generation is never overridden by new body.
+    fireEvent.click(view.getByRole('button'))
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+    view.rerender(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text={'First reasoning body\nEven more reasoning'} running usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('does not auto-expand a settled block that already carries body when it loads', () => {
+    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text={'Inspected the session'} running={false} usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('renders no Thinking row for a settled reasoning block that carries no body', () => {
+    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text="" running={false} usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.container.querySelector('[data-variant="think"]')).toBeNull()
+  })
+
+  it('renders an orphaned running tail with no body as no row once the Session settles', () => {
+    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text="" running generationLive={false} usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.container.querySelector('[data-variant="think"]')).toBeNull()
+  })
+
+  it('renders an orphaned streaming tail as settled once the Session stops generating', () => {
+    // Same streaming tail, settled Session: live chrome disappears and the
+    // whole text reads as the settled summary preview instead of the latest
+    // completed paragraph first line.
+    const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
+      text={'First line\n\nLatest completed paragraph'} running generationLive={false}
+      usePresentation={useDetailedPresentation} t={t} />)
+    expect(view.getByText('First line')).toBeTruthy()
+    expect(view.getByText('First line').closest('[data-streaming]')).toBeNull()
+    expect(view.queryByText('Latest completed paragraph')).toBeNull()
   })
 })

@@ -28,7 +28,8 @@ interface CommandState {
   readonly checkpoint?: ConversationMatch
 }
 
-interface CompactionEvidence {
+/** Summary and checkpoint evidence observed on the command that ran compaction. */
+export interface CompactionEvidence {
   readonly summary?: ConversationMatch
   readonly checkpoint?: ConversationMatch
 }

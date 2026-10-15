@@ -75,35 +75,3 @@ For agents, follow [AGENTS.md](AGENTS.md).
 [MIT](LICENSE)
 
 Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Changes in this tree
-
-This tree is based on upstream DeepSeek Harness tag `dsh-v0.2.1-alpha.3`
-(commit `2fbf4359b8`). Only the client chat UI changed; the server-side
-compaction protocol and durable records are unchanged.
-
-- Reasoning blocks auto-expand once at the first generating render that has
-  body text (DSH batches reasoning diffs, so body text can exist at first
-  paint); a manual close is then respected for the rest of the generation.
-  If no reasoning body ever appears, check the model request's reasoning
-  effort first: it comes from the model's default effort or the effort
-  selected in the model picker (`reasoningEffort`), and a `none`/minimal
-  effort returns no reasoning body at all, so set it to `high` when testing
-  this feature.
-- Automatic compaction progress renders as a display-only `running`/`failed`
-  row: the row is built only for a Turn-anchored start whose Turn has not
-  closed, and only while the session is running, so an interrupted run left
-  behind by a closed Turn never shows as in-progress during a later Turn.
-  Reloads of unfinished history stay free of stale running rows. `/compact`
-  markers and Trajectory views keep their existing behaviour.
-- Supported upstream version: `dsh-v0.2.1-alpha.3`. Build this tree with:
-
-  ```sh
-  corepack enable
-  pnpm install --frozen-lockfile
-  pnpm run build
-  ```
-
-  The repository pins `pnpm@11.28.5` via `packageManager` and uses `workspace:*`
-  dependencies, so `npm install` cannot resolve the workspace; run the app
-  after building with `pnpm dsh web`.

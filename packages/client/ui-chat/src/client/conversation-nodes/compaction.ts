@@ -68,20 +68,15 @@ export const compactionDefinition: ConversationNodeDefinition<CompactionState> =
   target: 'chat',
   match: (event) => {
     const checkpoint = compactSource(event)
-    if (checkpoint !== undefined) {
-      return checkpoint.sourceCommandId === undefined
-        ? { id: String(checkpoint.compactionId), role: 'update' }
-        : null
+    if (checkpoint !== undefined && checkpoint.sourceCommandId === undefined) {
+      return { id: checkpoint.compactionId, role: 'update' }
     }
     if (event.type === 'compaction/start'
       || event.type === 'compaction/summary'
       || event.type === 'compaction/end') {
-      const compactionId = event.data.compactionId
-      if (compactionId === undefined
-        || event.data.sourceCommandId !== undefined
-        || typeof compactionId !== 'string') {
-        return null
-      }
+      if (event.data.sourceCommandId !== undefined) return null
+      const compactionId: unknown = event.data.compactionId
+      if (typeof compactionId !== 'string' || compactionId === '') return null
       return { id: compactionId, role: event.type === 'compaction/start' ? 'start' : 'update' }
     }
     return null
@@ -92,13 +87,13 @@ export const compactionDefinition: ConversationNodeDefinition<CompactionState> =
     : updateCompactionState(context.state, match)),
   buildViewNode: (context) => {
     const state = context.state ?? fallbackState(context)
-    const marker = state?.checkpoint === undefined
+    const marker = state.checkpoint === undefined
       ? undefined
-      : compactSummary(state?.summary, state?.checkpoint)
+      : compactSummary(state.summary, state.checkpoint)
     if (marker !== undefined) {
       return chatNode(context, 'compaction', marker.seq, marker)
     }
-    const end = state?.end
+    const end = state.end
     const endPayload = end?.event.data as { readonly error?: unknown } | undefined
     // A landed checkpoint owns the completed marker above; an error without one
     // ends the run as one failed row, and an interruption leaves no row at all.
@@ -120,7 +115,7 @@ export const compactionDefinition: ConversationNodeDefinition<CompactionState> =
     // Turn already closed by a durable turn/end is history, not a live run.
     // The renderer additionally hides the row while the Session is not
     // running.
-    if (end === undefined && start !== undefined && state?.checkpoint === undefined
+    if (end === undefined && start !== undefined && state.checkpoint === undefined
       && startCarriesTurn(start)) {
       const data: CompactionProgressNode = {
         kind: 'compaction',

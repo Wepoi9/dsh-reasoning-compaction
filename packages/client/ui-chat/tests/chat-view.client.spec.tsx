@@ -4373,10 +4373,12 @@ describe('ChatView', () => {
   it('shows an automatic running row only while the Session is running', () => {
     const h = makeHarness({ nodes: [compactionProgress()] }, { running: true })
     const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByText('正在压缩…')).toBeTruthy()
     expect(view.getByText('正在生成摘要…')).toBeTruthy()
 
     act(() => { h.setSession({ running: false }) })
     expect(view.queryByText('正在生成摘要…')).toBeNull()
+    expect(view.queryByText('正在压缩…')).toBeNull()
 
     // A crashed run's leftover row loaded without a live Session renders none.
     const reload = makeHarness({ nodes: [compactionProgress()] }, { running: false })
@@ -4388,12 +4390,13 @@ describe('ChatView', () => {
     const h = makeHarness({ nodes: [compactionProgress({ status: 'failed', message: 'compaction model failed' })] },
       { running: true })
     const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByText('摘要生成失败')).toBeTruthy()
     expect(view.getByText('compaction model failed')).toBeTruthy()
     act(() => { h.setSession({ running: false }) })
     expect(view.getByText('compaction model failed')).toBeTruthy()
     const fallback = makeHarness({ nodes: [compactionProgress({ status: 'failed' })] }, { running: true })
     const fallbackView = render(<fallback.ChatView {...fallback.props} />)
-    expect(fallbackView.getByText('摘要生成失败')).toBeTruthy()
+    expect(within(fallbackView.container).getAllByText('摘要生成失败')).toHaveLength(2)
   })
 
   it('keeps /compact no-history and error settlements on the generic command row', () => {

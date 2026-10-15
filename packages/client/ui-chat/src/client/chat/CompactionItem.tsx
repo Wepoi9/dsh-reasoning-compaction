@@ -40,6 +40,9 @@ export const CompactionItem = memo(function CompactionItem({
   // A running or failed automatic row carries no summary yet; render one plain
   // label row so a start-without-checkpoint never leaves a blank summary row.
   if ('status' in node) {
+    const statusTitle = node.status === 'running'
+      ? t('message.compaction.running')
+      : t('message.compaction.failed')
     const statusSummary = node.status === 'running'
       ? t('message.compaction.summarizing')
       : node.message ?? t('message.compaction.failed')
@@ -50,7 +53,7 @@ export const CompactionItem = memo(function CompactionItem({
             <IconApiOutlineRegular />
           </span>
         </span>
-        <span className={css.compactionTitle}>{title ?? t('message.compaction')}</span>
+        <span className={css.compactionTitle}>{title ?? statusTitle}</span>
         <span className={css.compactionSep} aria-hidden />
         <span className={css.compactionSummary}>{statusSummary}</span>
       </div>

@@ -1,5 +1,45 @@
+diff --git a/README.md b/README.md
+index 7941e30f7b..746351ded8 100644
+--- a/README.md
++++ b/README.md
+@@ -75,3 +75,35 @@ For agents, follow [AGENTS.md](AGENTS.md).
+ [MIT](LICENSE)
+ 
+ Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
++
++## Changes in this tree
++
++This tree is based on upstream DeepSeek Harness tag `dsh-v0.2.1-alpha.3`
++(commit `2fbf4359b8`). Only the client chat UI changed; the server-side
++compaction protocol and durable records are unchanged.
++
++- Reasoning blocks auto-expand once at the first generating render that has
++  body text (DSH batches reasoning diffs, so body text can exist at first
++  paint); a manual close is then respected for the rest of the generation.
++  If no reasoning body ever appears, check the model request's reasoning
++  effort first: it comes from the model's default effort or the effort
++  selected in the model picker (`reasoningEffort`), and a `none`/minimal
++  effort returns no reasoning body at all, so set it to `high` when testing
++  this feature.
++- Automatic compaction progress renders as a display-only `running`/`failed`
++  row: the row is built only for a Turn-anchored start whose Turn has not
++  closed, and only while the session is running, so an interrupted run left
++  behind by a closed Turn never shows as in-progress during a later Turn.
++  Reloads of unfinished history stay free of stale running rows. `/compact`
++  markers and Trajectory views keep their existing behaviour.
++- Supported upstream version: `dsh-v0.2.1-alpha.3`. Build this tree with:
++
++  ```sh
++  corepack enable
++  pnpm install --frozen-lockfile
++  pnpm run build
++  ```
++
++  The repository pins `pnpm@11.28.5` via `packageManager` and uses `workspace:*`
++  dependencies, so `npm install` cannot resolve the workspace; run the app
++  after building with `pnpm dsh web`.
 diff --git a/apps/web/tests/lifecycle-chrome.e2e.ts b/apps/web/tests/lifecycle-chrome.e2e.ts
-index a9226b7f..b665a36b 100644
+index a9226b7fb7..b665a36bcc 100644
 --- a/apps/web/tests/lifecycle-chrome.e2e.ts
 +++ b/apps/web/tests/lifecycle-chrome.e2e.ts
 @@ -340,10 +340,10 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
@@ -16,10 +56,10 @@ index a9226b7f..b665a36b 100644
          }
          observedReasoning.resolve(undefined)
 diff --git a/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx b/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
-index dcc1141b..a1147748 100644
+index 22ae5bac70..aa4bd0b59c 100644
 --- a/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
 +++ b/packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx
-@@ -34,6 +34,9 @@ export interface AssistantMarkdownProps extends Pick<PropsRenderSlots<'conversat
+@@ -36,6 +36,9 @@ export interface AssistantMarkdownProps extends
    useDisclosure: UseDisclosure
    blocks: readonly AssistantBlock[]
    streaming: boolean
@@ -28,17 +68,17 @@ index dcc1141b..a1147748 100644
 +  generationLive?: boolean | undefined
    /** Frozen partial of an aborted turn: rendered with a stopped marker. */
    interrupted?: boolean | undefined
-   /** Render consecutive image blocks through the attachment slot. */
-@@ -54,7 +57,7 @@ export interface AssistantMarkdownProps extends Pick<PropsRenderSlots<'conversat
+   /** Hide reasoning that belongs to the Turn-level process disclosure. */
+@@ -54,7 +57,7 @@ export interface AssistantMarkdownProps extends
  
- /** Reasoning block as the Think variant summary row (figma 39:28304). */
+ /** Renders non-blank reasoning blocks as independent disclosures alongside the response. */
  export const AssistantMarkdown = memo(function AssistantMarkdown({
--  blocks, streaming, interrupted, renderMessageImages, groupPart, useDisclosure,
-+  blocks, streaming, generationLive = true, interrupted, renderMessageImages, groupPart, useDisclosure,
+-  blocks, streaming, interrupted, loadImage, groupPart, useDisclosure,
++  blocks, streaming, generationLive = true, interrupted, loadImage, groupPart, useDisclosure,
    reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
  }: AssistantMarkdownProps) {
    // Stable per locale revision (t identity changes on switch): a fresh object
-@@ -99,7 +102,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
+@@ -100,7 +103,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
              reveal={revealProcess}
              useGroupAction={useGroupAction}
            >
@@ -49,13 +89,13 @@ index dcc1141b..a1147748 100644
            </ProcessReasoning>,
          )
 diff --git a/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx b/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx
-index b77dffb7..af54cd74 100644
+index 5f61fe7007..32e7f29bab 100644
 --- a/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx
 +++ b/packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx
 @@ -9,7 +9,7 @@ type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<P
  /** Streaming, settled, and interrupted Assistant states share one keyed renderer instance. */
  export const AssistantNodeView = memo(function AssistantNodeView({
-   node, groupPart, useDisclosure, useGroupAction, useTurnData, turnProcess, openFile, renderMessageImages, fileMentions,
+   node, groupPart, useDisclosure, useGroupAction, useTurnData, turnProcess, openFile, loadImage, fileMentions,
 -  usePresentation, renderSlot, t,
 +  usePresentation, renderSlot, running, t,
  }: AssistantNodeViewProps) {
@@ -67,51 +107,50 @@ index b77dffb7..af54cd74 100644
        streaming={data.status === 'running'}
 +      generationLive={running}
        interrupted={data.status === 'interrupted'}
-       renderMessageImages={renderMessageImages}
+       loadImage={loadImage}
        reasoningHidden={reasoningHidden}
 diff --git a/packages/client/ui-chat/src/client/chat/ChatFlow.tsx b/packages/client/ui-chat/src/client/chat/ChatFlow.tsx
-index 1b8306ee..390a9f6e 100644
+index c54e8a108f..93b8bb881d 100644
 --- a/packages/client/ui-chat/src/client/chat/ChatFlow.tsx
 +++ b/packages/client/ui-chat/src/client/chat/ChatFlow.tsx
-@@ -31,7 +31,7 @@ export const ChatFlow = memo(function ChatFlow({
-   )
+@@ -26,7 +26,7 @@ export const ChatFlow = memo(function ChatFlow({
+   })
    const seatProps = {
      nodeStore, useChatNode, useChatNodeBottom, useChatNodeProcess, usePresentation,
 -    useStore, actions, renderSlot, t, useGroupAction, deferCollapse,
 +    useStore, actions, renderSlot, t, useGroupAction, deferCollapse, running,
-     cwd, openFile, openSkill, inspectCall, forkAt, loadImage, renderMessageImages, fileMentions,
+     cwd, openFile, inspectCall, forkAt, loadImage, fileMentions,
    }
    const rows = entries.map((entry) => {
 diff --git a/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx b/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
-index 4bc1947d..cc1cb7cf 100644
+index 9721b4a0a8..a49200235c 100644
 --- a/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
 +++ b/packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx
-@@ -47,7 +47,7 @@ function turnOf(node: ChatNode | undefined): number | undefined {
+@@ -48,7 +48,7 @@ function turnOf(node: ChatNode | undefined): number | undefined {
   */
  export const ChatNodeSeat = memo(function ChatNodeSeat({
    nodeKey, groupPart, useChatNode, useChatNodeProcess, usePresentation,
--  cwd, openFile, openSkill, inspectCall, forkAt,
-+  cwd, openFile, openSkill, inspectCall, forkAt, running,
-   loadImage, renderMessageImages, fileMentions, useStore, actions, renderSlot, t, useChatNodeBottom, deferCollapse, useGroupAction,
+-  cwd, openFile, inspectCall, forkAt,
++  cwd, openFile, inspectCall, forkAt, running,
+   loadImage, fileMentions, useStore, actions, renderSlot, t, useChatNodeBottom, deferCollapse, useGroupAction,
  }: ChatNodeSeatProps) {
    const bottom = useChatNodeBottom(nodeKey)
-@@ -130,12 +130,13 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
-       openSkill,
+@@ -130,11 +130,12 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
+       openFile,
        inspectCall,
        forkAt,
 +      running,
        loadImage,
-       renderMessageImages,
        fileMentions,
        turnProcess,
      }, [
--    node, groupPart, cwd, openFile, openSkill, inspectCall, forkAt,
-+    node, groupPart, cwd, openFile, openSkill, inspectCall, forkAt, running,
-     loadImage, renderMessageImages, fileMentions, turnProcess,
+-    node, groupPart, cwd, openFile, inspectCall, forkAt,
++    node, groupPart, cwd, openFile, inspectCall, forkAt, running,
+     loadImage, fileMentions, turnProcess,
    ])
    if (routedNode === undefined || owner === null) return null
 diff --git a/packages/client/ui-chat/src/client/chat/CompactionItem.tsx b/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
-index 006b5705..14e896c0 100644
+index 006b570557..14e896c00c 100644
 --- a/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
 +++ b/packages/client/ui-chat/src/client/chat/CompactionItem.tsx
 @@ -10,11 +10,12 @@ import {
@@ -158,10 +197,10 @@ index 006b5705..14e896c0 100644
    const open = expandable && expanded
    const summary = node.shadowedItemCount !== null && node.shadowedTokenCount !== null
 diff --git a/packages/client/ui-chat/src/client/chat/MessageItem.tsx b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
-index 9005150a..c631bd85 100644
+index 0d2f4c22fd..903b9ce691 100644
 --- a/packages/client/ui-chat/src/client/chat/MessageItem.tsx
 +++ b/packages/client/ui-chat/src/client/chat/MessageItem.tsx
-@@ -357,8 +357,13 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
+@@ -335,8 +335,13 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
  })
  
  /** Automatic compaction keyed Chat renderer. */
@@ -178,7 +217,7 @@ index 9005150a..c631bd85 100644
  
  /** Correlated retry-chain keyed Chat renderer. */
 diff --git a/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx b/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx
-index 8bbd738f..21c59efb 100644
+index 8bbd738f55..21c59efbdc 100644
 --- a/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx
 +++ b/packages/client/ui-chat/src/client/chat/ReasoningRow.tsx
 @@ -1,5 +1,5 @@
@@ -290,10 +329,10 @@ index 8bbd738f..21c59efb 100644
          expandable
          expandOnRowClick
 diff --git a/packages/client/ui-chat/src/client/contract/chat-nodes.ts b/packages/client/ui-chat/src/client/contract/chat-nodes.ts
-index cade646b..accb04bd 100644
+index ea65a14834..e3323050e1 100644
 --- a/packages/client/ui-chat/src/client/contract/chat-nodes.ts
 +++ b/packages/client/ui-chat/src/client/contract/chat-nodes.ts
-@@ -53,6 +53,22 @@ export interface ManualCompactionChatData {
+@@ -61,6 +61,22 @@ export interface ManualCompactionChatData {
    readonly compaction: CompactionSummaryNode | null
  }
  
@@ -317,12 +356,12 @@ index cade646b..accb04bd 100644
  export interface RetryChatData {
    readonly attempts: readonly ModelRetryNode[]
 diff --git a/packages/client/ui-chat/src/client/contract/slots.ts b/packages/client/ui-chat/src/client/contract/slots.ts
-index 52d7786e..8ed7cf56 100644
+index a85e28798d..4dd4a0b6f7 100644
 --- a/packages/client/ui-chat/src/client/contract/slots.ts
 +++ b/packages/client/ui-chat/src/client/contract/slots.ts
-@@ -223,6 +223,13 @@ export interface ChatNodeOwnerProps {
+@@ -218,6 +218,13 @@ export interface ChatNodeOwnerProps {
+   /** Session-authorized image loader supplied by the Chat view. */
    loadImage: MessageImageLoader
-   renderMessageImages: RenderMessageImages
    fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
 +  /**
 +   * Whether the owning Session is generating right now. Live generation
@@ -335,10 +374,10 @@ index 52d7786e..8ed7cf56 100644
    turnProcess?: TurnProcessOwnerProps | undefined
  }
 diff --git a/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts b/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
-index 0423e1ff..8087a6b6 100644
+index 933ae8f760..48d16a2697 100644
 --- a/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
 +++ b/packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts
-@@ -858,11 +858,17 @@ function legacyContribution(raw: ChatConversationViewNode): LegacyContribution {
+@@ -860,11 +860,17 @@ function legacyContribution(raw: ChatConversationViewNode): LegacyContribution {
      case 'steering':
      case 'context':
      case 'command':
@@ -358,7 +397,7 @@ index 0423e1ff..8087a6b6 100644
        const data = node.data
        if (data.status === 'running') {
 diff --git a/packages/client/ui-chat/src/client/conversation-nodes/command.ts b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
-index a52b8775..d4a3fc44 100644
+index a52b877552..d4a3fc440b 100644
 --- a/packages/client/ui-chat/src/client/conversation-nodes/command.ts
 +++ b/packages/client/ui-chat/src/client/conversation-nodes/command.ts
 @@ -28,7 +28,8 @@ interface CommandState {
@@ -372,7 +411,7 @@ index a52b8775..d4a3fc44 100644
    readonly checkpoint?: ConversationMatch
  }
 diff --git a/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts b/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
-index 9612f087..0d6c1d21 100644
+index 9612f08741..0d6c1d219a 100644
 --- a/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
 +++ b/packages/client/ui-chat/src/client/conversation-nodes/compaction.ts
 @@ -1,58 +1,136 @@
@@ -528,7 +567,7 @@ index 9612f087..0d6c1d21 100644
  }
  
 diff --git a/packages/client/ui-chat/src/client/index.ts b/packages/client/ui-chat/src/client/index.ts
-index a725061f..f254491b 100644
+index 275d76b96b..5eab3ffc7f 100644
 --- a/packages/client/ui-chat/src/client/index.ts
 +++ b/packages/client/ui-chat/src/client/index.ts
 @@ -23,7 +23,7 @@ export type {
@@ -541,7 +580,7 @@ index a725061f..f254491b 100644
    TurnProcessChatData, TurnTailChatData,
  } from './contract/chat-nodes.ts'
 diff --git a/packages/client/ui-chat/src/client/locale.ts b/packages/client/ui-chat/src/client/locale.ts
-index 5d24261a..38bf73dc 100644
+index 48cfcc8e13..d47880fa42 100644
 --- a/packages/client/ui-chat/src/client/locale.ts
 +++ b/packages/client/ui-chat/src/client/locale.ts
 @@ -139,6 +139,8 @@ export const zh = {
@@ -553,7 +592,7 @@ index 5d24261a..38bf73dc 100644
    'message.compaction.completed': '已压缩 {items} 条历史记录（约 {tokens} tokens）',
    'message.compaction.expand': '点击查看压缩摘要',
    'message.compaction.unavailable': '压缩摘要不可用',
-@@ -336,6 +338,8 @@ export const en = {
+@@ -337,6 +339,8 @@ export const en = {
    'message.context.recall.truncated': 'truncated',
    'message.compaction': 'Context compacted',
    'message.compaction.running': 'Compacting context…',
@@ -563,19 +602,19 @@ index 5d24261a..38bf73dc 100644
    'message.compaction.expand': 'View compaction summary',
    'message.compaction.unavailable': 'Compaction summary unavailable',
 diff --git a/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts b/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts
-index 1a0ed20d..f71bf1bd 100644
+index 5d5f32413e..4803ce17dd 100644
 --- a/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts
 +++ b/packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts
-@@ -8,7 +8,7 @@ import type {
-   ConversationLocationDataSource, ConversationLocationDataStore, ConversationTurnDataMap, TurnLocation,
+@@ -9,7 +9,7 @@ import type {
  } from '@deepseek-ai/dsh-client-ui-conversation/client'
  import { SessionSeq } from '@deepseek-ai/dsh-session/types'
+ import type { TurnEndReason } from '@deepseek-ai/dsh-session/types'
 -import type { TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
 +import type { CompactionProgressNode, TurnTokenUsage } from '../src/client/contract/chat-nodes.ts'
  import {
    sameTurnNavigationItem, turnNavigationItem,
  } from '../src/client/conversation-nodes/turn-navigation.ts'
-@@ -255,7 +255,7 @@ function assistantData(node: AssistantMessageNode): FinalAssistantChatData {
+@@ -271,7 +271,7 @@ function assistantData(node: AssistantMessageNode): FinalAssistantChatData {
  }
  
  function settledNode(
@@ -584,7 +623,7 @@ index 1a0ed20d..f71bf1bd 100644
    turns: ReadonlyMap<number, TurnLocation>,
    inferredTurn?: number,
  ): ChatConversationViewNode {
-@@ -285,7 +285,7 @@ function settledNode(
+@@ -302,7 +302,7 @@ function settledNode(
  
  /** Build the canonical Chat fixture corresponding to one legacy test slice. */
  export function chatSnapshotFixture(input: {
@@ -593,7 +632,7 @@ index 1a0ed20d..f71bf1bd 100644
    readonly partial?: PartialAssistant | null
    readonly runningCalls?: readonly RunningToolCall[]
    readonly turnTimings?: LegacyConversationSlice['turnTimings']
-@@ -295,7 +295,9 @@ export function chatSnapshotFixture(input: {
+@@ -314,7 +314,9 @@ export function chatSnapshotFixture(input: {
    readonly turnUsages?: ReadonlyMap<number, TurnTokenUsage> | undefined
  } = {}, previous?: ChatSnapshot): ChatSnapshot {
    const legacy: LegacyConversationSlice = {
@@ -604,7 +643,7 @@ index 1a0ed20d..f71bf1bd 100644
      partial: input.partial ?? null,
      runningCalls: input.runningCalls ?? EMPTY,
      turnTimings: input.turnTimings ?? new Map(),
-@@ -336,7 +338,9 @@ export function chatSnapshotFixture(input: {
+@@ -355,7 +357,9 @@ export function chatSnapshotFixture(input: {
        const candidates = sourceSeq === undefined
          ? []
          : legacy.nodes.filter((candidate): candidate is CompactionSummaryNode =>
@@ -615,7 +654,7 @@ index 1a0ed20d..f71bf1bd 100644
        const compaction = candidates.length === 1 ? candidates[0] : undefined
        if (node.outcome === null || compaction !== undefined) {
          if (compaction !== undefined) linkedCompactions.add(compaction)
-@@ -350,7 +354,7 @@ export function chatSnapshotFixture(input: {
+@@ -369,7 +373,7 @@ export function chatSnapshotFixture(input: {
          }]
        }
      }
@@ -624,7 +663,7 @@ index 1a0ed20d..f71bf1bd 100644
      const inferredTurn = node.kind === 'tool-result'
        ? legacy.nodes.slice(0, index).findLast(
          (candidate): candidate is AssistantMessageNode => candidate.kind === 'assistant',
-@@ -390,6 +394,10 @@ export function chatSnapshotFixture(input: {
+@@ -409,6 +413,10 @@ export function chatSnapshotFixture(input: {
        data: { root: call },
      })
    }
@@ -636,10 +675,10 @@ index 1a0ed20d..f71bf1bd 100644
      const inTurn = nodes.filter((candidate) => {
        const location = candidate.location
 diff --git a/packages/client/ui-chat/tests/chat-view.client.spec.tsx b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
-index 2357aced..ac4f7a57 100644
+index 241a0a2048..7f95441519 100644
 --- a/packages/client/ui-chat/tests/chat-view.client.spec.tsx
 +++ b/packages/client/ui-chat/tests/chat-view.client.spec.tsx
-@@ -9,7 +9,7 @@ import { useEffect, useMemo } from 'react'
+@@ -10,7 +10,7 @@ import { useEffect, useMemo } from 'react'
  import type {
    AssistantMessageNode, ChatFlowHookContext, ChatFlowOwnerProps, ChatFlowSlotProps,
    ChatNode, ChatNodeHookContext, ChatNodeOwnerProps, ChatSnapshot,
@@ -647,8 +686,8 @@ index 2357aced..ac4f7a57 100644
 +  ChatViewSlotProps, CommandNode, CompactionProgressNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
    LegacyConversationSlice, ModelRetryNode, StartedToolCall, SteeringMessageNode,
    ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode,
-   TranscriptViewMode, UserMessageNode,
-@@ -131,7 +131,8 @@ function makeSessionSource(init: Partial<TestSessionSnapshot> = {}) {
+   TranscriptViewMode, UserContentInput, UserMessageNode,
+@@ -133,7 +133,8 @@ function makeSessionSource(init: Partial<TestSessionSnapshot> = {}) {
    }
  }
  
@@ -658,7 +697,7 @@ index 2357aced..ac4f7a57 100644
    readonly turnUsages?: NonNullable<Parameters<typeof chatSnapshotFixture>[0]>['turnUsages']
  }
  type HarnessUpdate = ChatSlice & Partial<TestSessionSnapshot> & { readonly chat?: ChatSnapshot }
-@@ -227,6 +228,11 @@ const compaction = (over: Partial<CompactionSummaryNode> = {}): CompactionSummar
+@@ -229,6 +230,11 @@ const compaction = (over: Partial<CompactionSummaryNode> = {}): CompactionSummar
    ...over,
  })
  
@@ -670,7 +709,7 @@ index 2357aced..ac4f7a57 100644
  /** Empty sessions-list hook for the global standard-kit seat. */
  function emptySessions() {
    const store = createSnapshotStore<SessionListState>(
-@@ -4273,6 +4279,35 @@ describe('ChatView', () => {
+@@ -4364,6 +4370,35 @@ describe('ChatView', () => {
      expect(view.getByRole('heading', { name: '压缩摘要' })).toBeTruthy()
    })
  
@@ -707,10 +746,10 @@ index 2357aced..ac4f7a57 100644
      const noHistory = makeHarness({
        nodes: [command({
 diff --git a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
-index 3823a0db..0cb6fd4d 100644
+index 1e2400c45c..2b99e90f59 100644
 --- a/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
 +++ b/packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts
-@@ -2569,6 +2569,63 @@ describe('built-in conversation node Definitions', () => {
+@@ -2625,6 +2625,63 @@ describe('built-in conversation node Definitions', () => {
      expect(node(snapshot(value), 'compaction')).toBeUndefined()
    })
  
@@ -775,10 +814,39 @@ index 3823a0db..0cb6fd4d 100644
      const value = assembler([
        at(10, 'llm/retry', {
 diff --git a/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx b/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx
-index fbd21baf..6dc895f4 100644
+index 29ad9a4e4d..0194d6225a 100644
 --- a/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx
 +++ b/packages/client/ui-chat/tests/reasoning-row.client.spec.tsx
-@@ -55,6 +55,11 @@ describe('ReasoningRow', () => {
+@@ -78,10 +78,13 @@ describe('AssistantMarkdown reasoning blocks', () => {
+     const tailToggle = toggles[1]!
+     const tailRow = tailToggle.closest('[data-variant="think"]')
+     expect(tailRow?.getAttribute('data-state')).toBe('running')
+-    expect(view.queryByText(tail.text)).toBeNull()
+-    fireEvent.click(tailToggle)
++    // The extension auto-expands a live tail as soon as it carries text.
++    expect(tailToggle.getAttribute('aria-expanded')).toBe('true')
+     expect(view.getByText(tail.text)).toBeTruthy()
+     expect(earlierToggle.getAttribute('aria-expanded')).toBe('true')
++    fireEvent.click(tailToggle)
++    expect(tailToggle.getAttribute('aria-expanded')).toBe('false')
++    expect(earlierToggle.getAttribute('aria-expanded')).toBe('true')
+ 
+     view.rerender(<AssistantMarkdown {...props} blocks={blocks} streaming={false} />)
+     const settledToggles = view.getAllByRole('button')
+@@ -90,10 +93,10 @@ describe('AssistantMarkdown reasoning blocks', () => {
+     expect(settledToggles[1]).toBe(tailToggle)
+     expect(view.getByText('Earlier body')).toBe(earlierBody)
+     expect(tailRow?.getAttribute('data-state')).toBe('ok')
+-    expect(tailToggle.getAttribute('aria-expanded')).toBe('true')
++    expect(tailToggle.getAttribute('aria-expanded')).toBe('false')
+     fireEvent.click(tailToggle)
+     expect(earlierToggle.getAttribute('aria-expanded')).toBe('true')
+-    expect(tailToggle.getAttribute('aria-expanded')).toBe('false')
++    expect(tailToggle.getAttribute('aria-expanded')).toBe('true')
+   })
+ 
+   it.each(['Partial thought', '', ' \t\r\n'])('retains the stopped marker with blank reasoning around %j', (text) => {
+@@ -167,6 +170,11 @@ describe('ReasoningRow', () => {
    ])('previews the completed paragraph first line for %j', (text, summary) => {
      const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure}
        text={text} running usePresentation={useDetailedPresentation} t={t} />)
@@ -790,7 +858,7 @@ index fbd21baf..6dc895f4 100644
      const root = view.container.querySelector('[data-variant="think"]')!
      expect(root.querySelector('[class*="summaryText"]')?.textContent).toBe(summary)
      expect(root.hasAttribute('data-preview')).toBe(summary !== '')
-@@ -95,6 +100,7 @@ describe('ReasoningRow', () => {
+@@ -207,6 +215,7 @@ describe('ReasoningRow', () => {
      const usePresentation = bindSnapshotSelector(derivePresentationPolicy(mode, createSnapshotStore<CollapseTiming>('completion')))
      const props = { text: 'First line\n', usePresentation, t }
      const view = render(<ReasoningRow renderSlot={renderSlot} useDisclosure={useDisclosure} {...props} running />)
@@ -798,7 +866,7 @@ index fbd21baf..6dc895f4 100644
      const summary = view.getByText('First line')
      const root = view.container.querySelector('[data-variant="think"]')!
      expect(root.hasAttribute('data-preview')).toBe(true)
-@@ -106,30 +112,31 @@ describe('ReasoningRow', () => {
+@@ -218,30 +227,31 @@ describe('ReasoningRow', () => {
    it.each([
      { kind: 'text' as const, text: 'Answer' },
      { kind: 'tool-call' as const, callId: 'call-1', name: 'read', argsRaw: '{}' },
@@ -808,7 +876,7 @@ index fbd21baf..6dc895f4 100644
      const view = render(
        <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
          usePresentation={useDetailedPresentation}
-         t={t} blocks={[reasoning]} streaming renderMessageImages={renderMessageImages} />,
+         t={t} blocks={[reasoning]} streaming loadImage={unusedImageLoader} />,
      )
 -    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
 +    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
@@ -816,14 +884,14 @@ index fbd21baf..6dc895f4 100644
      view.rerender(
        <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
          usePresentation={useDetailedPresentation}
-         t={t} blocks={[reasoning, nextBlock]} streaming renderMessageImages={renderMessageImages} />,
+         t={t} blocks={[reasoning, nextBlock]} streaming loadImage={unusedImageLoader} />,
      )
 -    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('true')
 +    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
      view.rerender(
        <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
          usePresentation={useDetailedPresentation}
-         t={t} blocks={[reasoning, nextBlock]} streaming={false} renderMessageImages={renderMessageImages} />,
+         t={t} blocks={[reasoning, nextBlock]} streaming={false} loadImage={unusedImageLoader} />,
      )
 +    expect(view.getByRole('button').getAttribute('aria-expanded')).toBe('false')
 +    expect(view.queryByText(/Check persistence/)).toBeNull()
@@ -835,7 +903,7 @@ index fbd21baf..6dc895f4 100644
    })
  
    it('advances on completed paragraph first lines, then restores the settled first line', () => {
-@@ -143,7 +150,9 @@ describe('ReasoningRow', () => {
+@@ -255,7 +265,9 @@ describe('ReasoningRow', () => {
        />,
      )
      expect(view.getByText('运行中')).toBeTruthy()
@@ -846,7 +914,7 @@ index fbd21baf..6dc895f4 100644
      expect(view.getByText('Newest reasoning tokens').closest('[data-streaming]')?.getAttribute('data-streaming'))
        .toBe('true')
  
-@@ -230,12 +239,18 @@ describe('ReasoningRow', () => {
+@@ -342,12 +354,18 @@ describe('ReasoningRow', () => {
        />,
      )
  
@@ -870,8 +938,8 @@ index fbd21baf..6dc895f4 100644
    })
  
    it('keeps heading syntax in the collapsed summary and renders compact headings when expanded', () => {
-@@ -276,7 +291,7 @@ describe('ReasoningRow', () => {
-         renderMessageImages={renderMessageImages}
+@@ -388,7 +406,7 @@ describe('ReasoningRow', () => {
+         loadImage={unusedImageLoader}
        />,
      )
 -    fireEvent.click(view.getByText('思考'))
@@ -879,7 +947,7 @@ index fbd21baf..6dc895f4 100644
      const heading = view.getByRole('heading', { name: 'Investigation' })
      const emphasis = view.getByText('Check persistence')
      const text = first + Array.from({ length: 8 }, (_, index) => `Paragraph ${index}.`).join('\n\n')
-@@ -333,4 +348,54 @@ describe('ReasoningRow', () => {
+@@ -445,4 +463,54 @@ describe('ReasoningRow', () => {
        ),
      ).not.toBeNull()
    })

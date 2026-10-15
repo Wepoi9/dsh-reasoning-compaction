@@ -17,7 +17,8 @@ lane beyond its recorded evidence.
   `TS2307`/`TS2339` errors on unrelated `packages/api/*` modules (missing
   generated `*/remote` declarations), not caused by the overlay. After
   `pnpm run build` — whose own client-compiler gate passed ("9 passed, 0
-  failed, 0 skipped in 88.66s", "recorded 321 client artifact(s)") — the
+  failed, 0 skipped in 28.39s", "recorded 321 client artifact(s) with 2 public
+  value(s)") — the
   standalone `pnpm exec tsc -b tsconfig.client.json` exits 0, clean.
 - `pnpm run build` → exit 0; `apps/web/dist` present.
 
@@ -35,7 +36,7 @@ lane beyond its recorded evidence.
   `apps/web/tests/reasoning-preview.e2e.ts`,
   `apps/web/tests/seeded-history.e2e.ts`,
   `apps/web/tests/lifecycle-chrome.e2e.ts`:
-  3 failed | 31 passed | 6 skipped over 40 tests in 110.49 s.
+  3 failed | 31 passed | 6 skipped over 40 tests in 107.21 s.
 - The auto-expand-aligned specs passed inside this run: the reasoning-row and
   hero lifecycle scenarios produced no assertion failures.
 
@@ -53,9 +54,11 @@ Known failures and attribution:
   Windows renders `{{cwd}}\a.txt`. Path separator; environment only.
 - `reasoning-preview` right-edge fade test — the test failed only through the
   scaffold's `no turn/end within 30000ms` cap: the replayed reasoning stream
-  takes ~65 s on this host. The rerun of that file alone failed the same way
-  (66.35 s, same timeout, no assertion failure). Timing under this host's
-  replay speed; environment only.
+  takes ~65 s on this host. The test failed inside the final-tree run as the
+  last documented test with no assertion failure (67.19 s), and an earlier
+  rerun of that file alone failed the same way (66.35 s, same
+  `no turn/end within 30000ms` timeout, no assertion failure). Timing under
+  this host's replay speed; environment only.
 
 Attribution scope: the items above were reproduced and traced individually on
 the recording host (the fade failure twice). The full web lane was not rerun

@@ -31,16 +31,16 @@ history.
 ## Apply
 
 ```sh
-git clone --depth 1 https://github.com/Wepoi9/hermes-dsh-reasoning-compaction.git
+git clone --depth 1 https://github.com/Wepoi9/dsh-reasoning-compaction.git
 git clone https://github.com/deepseek-ai/deepseek-harness.git
 cd deepseek-harness
 git checkout dsh-v0.2.1-alpha.3
-git apply --check ../hermes-dsh-reasoning-compaction/patches/dsh-v0.2.1-alpha.3.patch
-git apply ../hermes-dsh-reasoning-compaction/patches/dsh-v0.2.1-alpha.3.patch
+git apply --check ../dsh-reasoning-compaction/patches/dsh-v0.2.1-alpha.3.patch
+git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.1-alpha.3.patch
 ```
 
 Both clones sit side by side: the patch files live in this repository, not in
-the upstream checkout, so the `../hermes-dsh-reasoning-compaction/` paths in
+the upstream checkout, so the `../dsh-reasoning-compaction/` paths in
 the `git apply` commands are required.
 
 ## Build and run

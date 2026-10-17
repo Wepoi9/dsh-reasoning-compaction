@@ -2625,6 +2625,63 @@ describe('built-in conversation node Definitions', () => {
     expect(node(snapshot(value), 'compaction')).toBeUndefined()
   })
 
+  it('renders a running row while automatic compaction has no landed checkpoint', () => {
+    // Automatic compaction fires while the current turn is still generating:
+    // the turn stays open until the generation settles, then the start arrives.
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/live-chunk', {
+        turn: 1,
+        step: 1,
+        chunk: { type: 'text-delta', index: 0, text: 'generating' },
+      }),
+      at(10, 'compaction/start', { compactionId: 'running-1', turn: 1 }),
+    ], true)
+
+    const running = node(snapshot(value), 'compaction')
+    expect(running?.data).toMatchObject({ status: 'running' })
+    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(1)
+  })
+
+  it('shows no running row for a legacy session-level compaction start', () => {
+    // The legacy shape carries no Turn: a Turn-end event used to terminate it,
+    // so a session-level start is durable history, never a running row.
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(5, 'turn/end', { turn: 1, reason: { kind: 'interrupted' } }),
+      at(10, 'compaction/start', { compactionId: 'reloaded-1', turn: null }),
+    ], true)
+
+    expect(node(snapshot(value), 'compaction')).toBeUndefined()
+    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(0)
+  })
+
+  it('shows no running row for a Turn-anchored start whose Turn closed without a terminal event', () => {
+    // A crashed run leaves its Turn closed with neither a landed checkpoint nor
+    // an error-carrying end: that start is history, not a live run, so a later
+    // generating Turn must not render it as in-progress compaction.
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(5, 'turn/end', { turn: 1, reason: { kind: 'interrupted' } }),
+      at(10, 'compaction/start', { compactionId: 'crashed-1', turn: 1 }),
+    ], true)
+
+    expect(node(snapshot(value), 'compaction')).toBeUndefined()
+    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(0)
+  })
+
+  it('renders a failed row when a checkpoint-less run errors on its end event', () => {
+    const value = assembler([
+      at(10, 'compaction/start', { compactionId: 'failed-1', turn: null }),
+      at(11, 'compaction/end', { compactionId: 'failed-1', turn: null, error: 'This operation was aborted' }),
+    ], true)
+
+    const failed = node(snapshot(value), 'compaction')
+    expect(failed?.data).toMatchObject({ status: 'failed' })
+    expect(snapshot(value).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(1)
+  })
+
   it('ignores legacy retry and PTC dispatch events without correlation ids', () => {
     const value = assembler([
       at(10, 'llm/retry', {

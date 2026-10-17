@@ -860,11 +860,17 @@ function legacyContribution(raw: ChatConversationViewNode): LegacyContribution {
     case 'steering':
     case 'context':
     case 'command':
-    case 'compaction':
     case 'turn-error':
     case 'turn-max-tokens':
     case 'unknown':
       return { anchorSeq: node.anchorSeq, nodes: [node.data], partial: null, running: null }
+    case 'compaction': {
+      const data = node.data
+      // The legacy slice owns durable records only; an automatic in-progress
+      // or failed row is rendering state that reaches the Chat nodes directly.
+      if ('status' in data) return EMPTY_CONTRIBUTION
+      return { anchorSeq: node.anchorSeq, nodes: [data], partial: null, running: null }
+    }
     case 'assistant-step': {
       const data = node.data
       if (data.status === 'running') {

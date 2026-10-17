@@ -61,6 +61,22 @@ export interface ManualCompactionChatData {
   readonly compaction: CompactionSummaryNode | null
 }
 
+/**
+ * In-progress or failed automatic-compaction Chat row before its checkpoint
+ * lands; a display-only payload that never enters the durable record union.
+ */
+export interface CompactionProgressNode {
+  readonly kind: 'compaction'
+  /** Lifecycle status of the row rendered before its checkpoint lands. */
+  readonly status: 'running' | 'failed'
+  /** Seq of the `compaction/start`, or error-carrying `compaction/end`, event this row renders. */
+  readonly seq: number
+  /** Recorded wall time of the start or failing end event the row is anchored to. */
+  readonly time: number
+  /** Transient failure reason carried by the end event; never a durable field. */
+  readonly message?: string | undefined
+}
+
 /** One durable retry chain rendered as a single row. */
 export interface RetryChatData {
   readonly attempts: readonly ModelRetryNode[]

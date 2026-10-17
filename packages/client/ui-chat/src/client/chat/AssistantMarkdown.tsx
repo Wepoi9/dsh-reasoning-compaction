@@ -36,6 +36,9 @@ export interface AssistantMarkdownProps extends
   useDisclosure: UseDisclosure
   blocks: readonly AssistantBlock[]
   streaming: boolean
+  /** Whether the owning Session is generating now; an orphaned streaming tail
+   * renders settled. Omitted direct renders keep the legacy live behavior. */
+  generationLive?: boolean | undefined
   /** Frozen partial of an aborted turn: rendered with a stopped marker. */
   interrupted?: boolean | undefined
   /** Hide reasoning that belongs to the Turn-level process disclosure. */
@@ -54,7 +57,7 @@ export interface AssistantMarkdownProps extends
 
 /** Renders non-blank reasoning blocks as independent disclosures alongside the response. */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
-  blocks, streaming, interrupted, loadImage, groupPart, useDisclosure,
+  blocks, streaming, generationLive = true, interrupted, loadImage, groupPart, useDisclosure,
   reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
@@ -100,7 +103,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
             reveal={revealProcess}
             useGroupAction={useGroupAction}
           >
-            <ReasoningRow text={block.text} running={streaming && i === last} usePresentation={usePresentation}
+            <ReasoningRow text={block.text} running={streaming && i === last} generationLive={generationLive}
+              usePresentation={usePresentation}
               useDisclosure={useDisclosure} renderSlot={renderSlot} t={t} />
           </ProcessReasoning>,
         )

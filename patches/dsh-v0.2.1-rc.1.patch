@@ -1,8 +1,8 @@
 diff --git a/apps/web/tests/lifecycle-chrome.e2e.ts b/apps/web/tests/lifecycle-chrome.e2e.ts
-index a9226b7fb7..b665a36bcc 100644
+index a0259aa131..afb24a925d 100644
 --- a/apps/web/tests/lifecycle-chrome.e2e.ts
 +++ b/apps/web/tests/lifecycle-chrome.e2e.ts
-@@ -340,10 +340,10 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
+@@ -349,10 +349,10 @@ describe('web e2e: lifecycle & chrome (workspace flow / reload / dark mode)', ()
          if (MODE !== 'record') {
            const thinking = page.locator('[data-variant="think"][data-state="running"]')
            await expandOwningTurnProcess(page, thinking)

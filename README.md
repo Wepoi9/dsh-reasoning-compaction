@@ -18,15 +18,15 @@ shipped as a patch overlay instead of a forked tree.
   Reloads of unfinished history stay free of stale running rows. `/compact`
   markers and Trajectory views keep their existing behaviour.
 
-Supported upstream version: tag `dsh-v0.2.1-alpha.3` (commit `2fbf4359b8`).
-`patches/dsh-v0.2.1-alpha.3.patch` reproduces the fixed tree: after `git apply`
-on that tag checkout, `git diff --exit-code d03d9c7fb4` against this
-repository's `alpha3-overlay` branch tip is empty. Only the client chat UI
+Supported upstream version: tag `dsh-v0.2.1-rc.1` (commit `1600d8a1e1`).
+`patches/dsh-v0.2.1-rc.1.patch` reproduces the fixed tree: after `git apply`
+on that tag checkout, `git diff --exit-code b7946fdd34` against this
+repository's `rc1-overlay` branch tip is empty. Only the client chat UI
 changed; the server-side compaction protocol and durable records are unchanged.
-The source of the patch lives on the `alpha3-overlay` branch of this
-repository, re-landed on the alpha.3 chat UI structure. The alpha.2 overlay was
-retired with the alpha.3 patch; the alpha.2 tree lives on in this repository's
-history.
+The source of the patch lives on the `rc1-overlay` branch of this repository,
+re-landed on the rc.1 chat UI structure. The alpha.3 overlay was retired with
+the rc.1 patch; the alpha.3 tree lives on in this repository's history and on
+the pushed `alpha3-overlay` branch.
 
 ## Apply
 
@@ -34,9 +34,9 @@ history.
 git clone --depth 1 https://github.com/Wepoi9/dsh-reasoning-compaction.git
 git clone https://github.com/deepseek-ai/deepseek-harness.git
 cd deepseek-harness
-git checkout dsh-v0.2.1-alpha.3
-git apply --check ../dsh-reasoning-compaction/patches/dsh-v0.2.1-alpha.3.patch
-git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.1-alpha.3.patch
+git checkout dsh-v0.2.1-rc.1
+git apply --check ../dsh-reasoning-compaction/patches/dsh-v0.2.1-rc.1.patch
+git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.1-rc.1.patch
 ```
 
 Both clones sit side by side: the patch files live in this repository, not in
@@ -53,7 +53,7 @@ pnpm dsh web
 ```
 
 The repository pins `pnpm@11.28.5` via `packageManager` and uses `workspace:*`
-dependencies, so `npm install` cannot resolve the workspace. Alpha.3's client
+dependencies, so `npm install` cannot resolve the workspace. rc.1's client
 typecheck (`tsc -b tsconfig.client.json`) needs the generated Typert
 declarations that `pnpm run build` produces; run it after the build. Full
 project documentation lives in the upstream repository and at
@@ -70,7 +70,7 @@ golden, one replayed-stream timeout), not UI regressions; the focused lane was
 rerun in full on the final tree under unified conditions and produced no
 failure outside that itemized list. The hero
 first-prompt spec is aligned with the auto-expand behaviour and passes on the
-alpha.3 lane.
+rc.1 lane.
 
 ## License
 

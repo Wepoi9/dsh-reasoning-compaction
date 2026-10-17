@@ -10,11 +10,12 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { markdownLabels } from '../markdown-labels.ts'
+import type { CompactionProgressNode } from '../contract/chat-nodes.ts'
 import type { CompactionSummaryNode } from '../contract/snapshot.ts'
 import css from './MessageItem.module.css'
 
 interface CompactionItemProps {
-  node: CompactionSummaryNode
+  node: CompactionSummaryNode | CompactionProgressNode
   /** Optional command title for a manual compaction folded into this marker. */
   title?: string
   /** Command settlement text used when structured compaction counts are unavailable. */
@@ -36,6 +37,28 @@ export const CompactionItem = memo(function CompactionItem({
 }: CompactionItemProps) {
   const [expanded, setExpanded] = useState(false)
   const labels = useMemo(() => markdownLabels(t), [t])
+  // A running or failed automatic row carries no summary yet; render one plain
+  // label row so a start-without-checkpoint never leaves a blank summary row.
+  if ('status' in node) {
+    const statusTitle = node.status === 'running'
+      ? t('message.compaction.running')
+      : t('message.compaction.failed')
+    const statusSummary = node.status === 'running'
+      ? t('message.compaction.summarizing')
+      : node.message ?? t('message.compaction.failed')
+    return (
+      <div className={css.compactionRow}>
+        <span className={css.compactionLeading} aria-hidden>
+          <span className={css.compactionContextIcon} data-compaction-icon="context">
+            <IconApiOutlineRegular />
+          </span>
+        </span>
+        <span className={css.compactionTitle}>{title ?? statusTitle}</span>
+        <span className={css.compactionSep} aria-hidden />
+        <span className={css.compactionSummary}>{statusSummary}</span>
+      </div>
+    )
+  }
   const expandable = node.summary !== null
   const open = expandable && expanded
   const summary = node.shadowedItemCount !== null && node.shadowedTokenCount !== null

@@ -1,5 +1,5 @@
 /** Assistant reasoning disclosure, independent of Tool-call presentation. */
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import { DisclosureRow, IconThinkOutlineRegular, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChatViewSlotProps, UseDisclosure, UsePresentation } from '../contract/slots.ts'
@@ -39,56 +39,83 @@ function latestCompletedParagraphFirstLine(text: string): string {
  * collapsed summaries.
  * @param props.text - complete or streaming reasoning text.
  * @param props.running - whether this block is the streaming tail.
+ * @param props.generationLive - whether the owning Session is generating now;
+ *   defaults to true, and an orphaned running tail renders settled preview while false.
  * @param props.usePresentation - live display-policy selector for this reasoning row.
  * @param props.useDisclosure - independent open state with enclosing-Turn resets.
  * @param props.renderSlot - framework renderer for the standard reasoning Body Slot.
  * @param props.t - conversation locale seat for the disclosure and running status.
  * @returns the reasoning disclosure.
  */
-export const ReasoningRow = memo(function ReasoningRow({ text, running, usePresentation, useDisclosure, renderSlot, t }: {
-  text: string
-  running: boolean
-  useDisclosure: UseDisclosure
-  usePresentation: UsePresentation
-  t: ChatViewSlotProps['t']
-} & Pick<PropsRenderSlots<'conversation.chat.reasoning.body'>, 'renderSlot'>) {
-  const { expanded, toggle } = useDisclosure()
-  const summaryText = running ? latestCompletedParagraphFirstLine(text) : firstLine(text)
+export const ReasoningRow = memo(function ReasoningRow({ text, running, generationLive = true, usePresentation,
+  useDisclosure, renderSlot, t }: {
+    text: string
+    running: boolean
+    generationLive?: boolean
+    useDisclosure: UseDisclosure
+    usePresentation: UsePresentation
+    t: ChatViewSlotProps['t']
+  } & Pick<PropsRenderSlots<'conversation.chat.reasoning.body'>, 'renderSlot'>) {
+  const { expanded, toggle, setExpanded } = useDisclosure()
+  // Live streaming chrome is generation chrome: while the owning Session is
+  // not generating, an orphaned running tail carries no live state and shows
+  // settled summary preview instead.
+  const live = running && generationLive
+  const summaryText = live ? latestCompletedParagraphFirstLine(text) : firstLine(text)
   const summary = useMemo(() => summaryText.replaceAll('**', ''), [summaryText])
   const preview = usePresentation(policy => !expanded && summary !== ''
-    && (running || policy.settledReasoningPreview))
+    && (live || policy.settledReasoningPreview))
   const collapsedContent = useMemo(() => (
     <>
       <span className={css.separator} data-shimmer-decoration aria-hidden />
-      <span className={css.summary} data-streaming={running || undefined}>
+      <span className={css.summary} data-streaming={live || undefined}>
         <span className={css.summaryText}>
           <TextShimmer>{summary}</TextShimmer>
         </span>
       </span>
     </>
-  ), [running, summary])
+  ), [live, summary])
   const content = useMemo(() => expanded ? (
     <div className={css.thinkBody}>
-      {renderSlot('conversation.chat.reasoning.body', { text, running })}
+      {renderSlot('conversation.chat.reasoning.body', { text, running: live })}
     </div>
-  ) : undefined, [expanded, renderSlot, running, text])
+  ) : undefined, [expanded, renderSlot, live, text])
+
+  // Auto-expand whenever a generating block carries body and it has not
+  // expanded yet — including the first render: DSH batches reasoning diffs,
+  // so body may already exist when the row first paints. A manual close is
+  // then respected; settled blocks loading with body stay collapsed.
+  const bodyArrived = useRef(false)
+  useEffect(() => {
+    const hasBody = text.trim().length > 0
+    if (!live || !hasBody || bodyArrived.current) {
+      bodyArrived.current = hasBody
+      return
+    }
+    bodyArrived.current = true
+    setExpanded(true)
+  }, [live, text, setExpanded])
+  // A settled block with no body has lost its generation condition; render no
+  // empty Thinking row rather than leaving a blank heading behind — the same
+  // holds for an orphaned tail whose Session no longer generates.
+  if (!live && text.trim().length === 0) return null
 
   return (
     <div
       className={css.root}
       data-variant="think"
-      data-state={running ? 'running' : 'ok'}
+      data-state={live ? 'running' : 'ok'}
       data-expanded={expanded || undefined}
       data-preview={preview || undefined}
     >
-      {running && <span className={a11yCss.visuallyHidden}>{t('row.running')}</span>}
+      {live && <span className={a11yCss.visuallyHidden}>{t('row.running')}</span>}
       <DisclosureRow
         rowClassName={css.row}
         leadingClassName={css.leading}
         titleClassName={css.title}
         icon={THINK_ICON}
         title={t('message.think')}
-        running={running}
+        running={live}
         open={expanded}
         expandable
         expandOnRowClick

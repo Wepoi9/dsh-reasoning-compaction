@@ -26,7 +26,7 @@ export const ChatFlow = memo(function ChatFlow({
   })
   const seatProps = {
     nodeStore, useChatNode, useChatNodeBottom, useChatNodeProcess, usePresentation,
-    useStore, actions, renderSlot, t, useGroupAction, deferCollapse,
+    useStore, actions, renderSlot, t, useGroupAction, deferCollapse, running,
     cwd, openFile, inspectCall, forkAt, loadImage, fileMentions,
   }
   const rows = entries.map((entry) => {

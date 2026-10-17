@@ -27,3 +27,9 @@ lib/
 # Local DSH runtime state written under a checkout
 .sessions/
 .storages/
+
+# Leftover upstream trees and build output from checkouts of the overlay branches
+.artifacts/
+.dsh-build/
+apps/
+website/

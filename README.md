@@ -30,7 +30,10 @@ verification record is
 8/8 artifact-build gates, 3/3 i18n gates, 2/2 build-check gates, and all 311
 focused ui-chat tests passed. The wider GUI suite and focused browser replay
 were not green; their exact outcomes and limitations are recorded there, not
-claimed as passing. The alpha.2 port re-landed eight rejected hunks on the
+claimed as passing. A follow-up clean-baseline comparison in the same evidence
+file reproduced the symlink EPERM and hero-golden failures on the unpatched
+tag as well, so none of the reproduced failures is attributed to the overlay.
+The alpha.2 port re-landed eight rejected hunks on the
 current chat structure (`AssistantMarkdown.tsx`, `AssistantNodeView.tsx`,
 `ChatFlow.tsx`, `ReasoningRow.tsx`, and the two specs) and extended the two
 new locale keys to all eight dictionaries, which alpha.2's locale completeness

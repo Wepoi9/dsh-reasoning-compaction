@@ -12,14 +12,31 @@ shipped as a patch overlay instead of a forked tree.
   (`reasoningEffort`), and a `none`/minimal effort returns no reasoning body at
   all, so set it to `high` when testing this feature.
 - Automatic compaction progress renders as a display-only `running`/`failed`
-  row: the row is built only for a Turn-anchored start whose Turn has not
-  closed, and only while the session is running, so an interrupted run left
-  behind by a closed Turn never shows as in-progress during a later Turn.
-  Reloads of unfinished history stay free of stale running rows. `/compact`
-  markers and Trajectory views keep their existing behaviour.
+  row. A `running` row requires a Turn-anchored start with an open Turn, no
+  checkpoint or end event, and a running Session. An automatic error-bearing
+  `compaction/end` without a checkpoint creates a `failed` row; it is not
+  gated on `Session.running` and remains visible after the Session settles.
+  Session-level or closed-Turn starts, and interrupted starts without an end,
+  never render as running progress. `/compact` markers and Trajectory views
+  keep their existing behaviour.
 
-Supported upstream version: tag `dsh-v0.2.1-rc.2` (commit `687f282e86`).
-`patches/dsh-v0.2.1-rc.2.patch` reproduces the fixed tree: after `git apply`
+Supported upstream versions: tag `dsh-v0.2.2-alpha.2` (commit `f3803c9697`) and tag `dsh-v0.2.1-rc.2` (commit `687f282e86`), with one patch per version.
+
+`patches/dsh-v0.2.2-alpha.2.patch` is based on
+`dsh-v0.2.2-alpha.2` (commit `f3803c96974a`). It applies cleanly to a clean
+base and reverse-applies cleanly to the patched tree. The alpha.2-specific
+verification record is
+[`patches/evidence/VERIFICATION-dsh-v0.2.2-alpha.2.md`](patches/evidence/VERIFICATION-dsh-v0.2.2-alpha.2.md):
+8/8 artifact-build gates, 3/3 i18n gates, 2/2 build-check gates, and all 311
+focused ui-chat tests passed. The wider GUI suite and focused browser replay
+were not green; their exact outcomes and limitations are recorded there, not
+claimed as passing. The alpha.2 port re-landed eight rejected hunks on the
+current chat structure (`AssistantMarkdown.tsx`, `AssistantNodeView.tsx`,
+`ChatFlow.tsx`, `ReasoningRow.tsx`, and the two specs) and extended the two
+new locale keys to all eight dictionaries, which alpha.2's locale completeness
+check requires.
+
+`patches/dsh-v0.2.1-rc.2.patch` reproduces the fixed rc.2 tree: after `git apply`
 on that tag checkout, `git diff --exit-code 85c0b8631d` against this
 repository's `rc2-overlay` branch tip is empty. Only the client chat UI
 changed; the server-side compaction protocol and durable records are unchanged.
@@ -34,9 +51,9 @@ the pushed `rc1-overlay` branch.
 git clone --depth 1 https://github.com/Wepoi9/dsh-reasoning-compaction.git
 git clone https://github.com/deepseek-ai/deepseek-harness.git
 cd deepseek-harness
-git checkout dsh-v0.2.1-rc.2
-git apply --check ../dsh-reasoning-compaction/patches/dsh-v0.2.1-rc.2.patch
-git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.1-rc.2.patch
+git checkout dsh-v0.2.2-alpha.2
+git apply --check ../dsh-reasoning-compaction/patches/dsh-v0.2.2-alpha.2.patch
+git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.2-alpha.2.patch
 ```
 
 Both clones sit side by side: the patch files live in this repository, not in
@@ -61,16 +78,17 @@ project documentation lives in the upstream repository and at
 
 ## Verification and known failures
 
-`patches/evidence/VERIFICATION.md` records the unit-test, typecheck, build,
-patch-application, live-app, and real-Chromium web-e2e results with each
-failure's attribution. The web-e2e failures itemized there are host-environment items
-(missing WebKit executable, shared skills catalog injected into the slash-menu
-candidates and the persisted-replay snapshot, a Windows path separator in one
-golden, one replayed-stream timeout), not UI regressions; the focused lane was
-rerun in full on the final tree under unified conditions and produced no
-failure outside that itemized list. The hero
-first-prompt spec is aligned with the auto-expand behaviour and passes on the
-rc.2 lane.
+`patches/evidence/VERIFICATION.md` is the rc.2 verification record; its
+results do not describe alpha.2. Alpha.2-specific checks and non-passing
+broader/browser runs are recorded in
+[`patches/evidence/VERIFICATION-dsh-v0.2.2-alpha.2.md`](patches/evidence/VERIFICATION-dsh-v0.2.2-alpha.2.md).
+The rc.2 web-e2e failures itemized in `VERIFICATION.md` are host-environment
+items (missing WebKit executable, shared skills catalog injected into the
+slash-menu candidates and persisted-replay snapshot, a Windows path separator
+in one golden, one replayed-stream timeout), not UI regressions; the focused
+rc.2 lane was rerun in full on the final tree under unified conditions and
+produced no failure outside that itemized list. The hero first-prompt spec
+passed on the rc.2 lane.
 
 ## License
 

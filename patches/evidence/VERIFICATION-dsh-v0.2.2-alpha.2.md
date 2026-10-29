@@ -61,3 +61,16 @@ Interpretation, limited to what these reruns show:
 - The hero ARIA golden mismatch reproduces identically on the unpatched baseline: the shipped golden expects an empty paragraph inside the composer and alpha.2 renders none at this tag on this machine. This is a pre-existing golden mismatch, not an overlay regression; the patch contains no hero or composer changes.
 
 The broad GUI suite is still not green, but every failure reproduced after the comparison is attributable to this machine or to suite-load flakes, and none reproduced as an overlay-specific change.
+
+## Live browser verification (2026-10-29)
+
+The patched alpha.2 source worktree — whose `git diff` is byte-identical to `patches/dsh-v0.2.2-alpha.2.patch` — was served as the real web app in an isolated environment (separate home directory, port 3081, local OpenAI-compatible test provider, telemetry disabled). Production homes and ports were untouched.
+
+Observed in a real browser driven over CDP:
+
+- The chat UI loaded with zero plugin-compatibility rejections and sessions restored from `session.v4.jsonl.zstd`.
+- Reasoning rows rendered live during generation and auto-expanded once at the first paint that carried body text; the row collapsed at settlement, and manual open/close toggling worked afterwards.
+- `/compact` showed in-progress text ("コンテキストを圧縮中…", "要約を生成中…"), then a settled compaction row ("圧縮しました 10件の履歴（約6146 token）") with expandable summary content, and the row persisted across a page reload and session re-entry.
+- The companion compaction-count dock incremented exactly once on the successful compaction and stayed unchanged after an earlier failed compaction caused by the test profile's small `maxTokens` setting, not by the overlay.
+
+This is a passing live-browser record for the overlay's user-visible behaviour (reasoning auto-expand and compaction progress display). It is separate from the built-artifact golden replay above, which still fails on the pre-existing hero-composer golden mismatch reproduced on the unpatched tag.

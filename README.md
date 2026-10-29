@@ -33,6 +33,11 @@ were not green; their exact outcomes and limitations are recorded there, not
 claimed as passing. A follow-up clean-baseline comparison in the same evidence
 file reproduced the symlink EPERM and hero-golden failures on the unpatched
 tag as well, so none of the reproduced failures is attributed to the overlay.
+The same file also records a passing live-browser verification (2026-10-29)
+of the overlay's user-visible behaviour — reasoning auto-expand, compaction
+progress and settled row, persistence across reload — served from the patched
+tree in an isolated runtime; the built-artifact replay itself remains failing
+on the pre-existing golden mismatch.
 The alpha.2 port re-landed eight rejected hunks on the
 current chat structure (`AssistantMarkdown.tsx`, `AssistantNodeView.tsx`,
 `ChatFlow.tsx`, `ReasoningRow.tsx`, and the two specs) and extended the two

@@ -1,5 +1,7 @@
 # DSH reasoning auto-expand & automatic compaction progress — patch distribution
 
+English | [日本語](README.ja.md)
+
 Two client-chat UI changes for
 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness),
 shipped as a patch overlay instead of a forked tree.

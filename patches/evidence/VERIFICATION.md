@@ -2,10 +2,11 @@
 
 All runs recorded on the Windows recording host on 2026-10-17, against the tree
 produced by `git apply patches/dsh-v0.2.1-rc.2.patch` on a checkout of the tag
-`dsh-v0.2.1-rc.2` at commit `687f282e86` (tree identity to the chain tip
-`85c0b8631d` on branch `rc2-overlay` verified below). The rc.1 patch was
-retired with the rc.2 patch; nothing here was re-checked against the rc.1 lane
-beyond its recorded evidence.
+`dsh-v0.2.1-rc.2` at commit `687f282e86` (tree identity to the recorded chain tip
+`85c0b8631d` verified below; the `rc2-overlay` branch that hosted that tree was
+retired on 2026-11-05, so the SHA stays as a historical identifier only). The
+rc.1 patch was retired with the rc.2 patch; nothing here was re-checked against
+the rc.1 lane beyond its recorded evidence.
 
 ## Unit tests, typecheck, build
 

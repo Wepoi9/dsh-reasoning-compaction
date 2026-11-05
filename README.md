@@ -48,15 +48,19 @@ current chat structure (`AssistantMarkdown.tsx`, `AssistantNodeView.tsx`,
 new locale keys to all eight dictionaries, which alpha.2's locale completeness
 check requires.
 
-`patches/dsh-v0.2.1-rc.2.patch` reproduces the fixed rc.2 tree: after `git apply`
-on that tag checkout, `git diff --exit-code 85c0b8631d` against this
-repository's `rc2-overlay` branch tip is empty. Only the client chat UI
-changed; the server-side compaction protocol and durable records are unchanged.
-The source of the patch lives on the `rc2-overlay` branch of this repository,
-re-landed on the rc.2 chat UI structure. The 0.2.1-rc.1 patch was retired with
-the rc.2 patch; that tree lives on in this repository's history and on the
-pushed `rc1-overlay` branch. (Do not confuse it with `dsh-v0.2.2-rc.1`, which is
-a later tag and has its own patch below.)
+`patches/dsh-v0.2.1-rc.2.patch` reproduces the fixed rc.2 tree: applying it on
+that tag checkout yields the tree the verification record describes, originally
+recorded as `85c0b8631d`. Only the client chat UI changed; the server-side
+compaction protocol and durable records are unchanged. The 0.2.1-rc.1 patch was
+retired when the rc.2 patch landed. (Do not confuse 0.2.1-rc.1 with
+`dsh-v0.2.2-rc.1`, which is a later tag and has its own patch below.)
+
+The `alpha3-overlay`, `rc1-overlay`, and `rc2-overlay` branches were retired on
+2026-11-05: each hosted a full DSH tree, which made the remote's audit surface
+far larger than the patch files that are the actual deliverable. The patch files
+in `patches/` remain the record; the tree SHAs in this README and in
+`patches/evidence/VERIFICATION.md` stay as historical identifiers and are no
+longer fetchable.
 
 ## Apply
 

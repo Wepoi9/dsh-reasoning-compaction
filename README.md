@@ -24,6 +24,8 @@ shipped as a patch overlay instead of a forked tree.
 
 Supported upstream versions: tag `dsh-v0.2.2-alpha.2` (commit `f3803c9697`) and tag `dsh-v0.2.1-rc.2` (commit `687f282e86`), with one patch per version.
 
+**DSH 0.2.2-rc.1 needs no patch.** From tag `dsh-v0.2.2-rc.1` (commit `66491b05e3`) upstream ships both behaviors itself: `ReasoningRow.tsx` auto-expands a generating reasoning block at the first render that has body text and respects a manual close, and `conversation-nodes/compaction.ts` builds the display-only `running` / `failed` `CompactionProgressNode` with the same gating this overlay added. Neither patch applies to that tag — `git apply --check` fails on every hunk — and no rc.1 patch is published. The file/line evidence and the exact command output are in [`patches/evidence/RC1-NATIVE.md`](patches/evidence/RC1-NATIVE.md).
+
 `patches/dsh-v0.2.2-alpha.2.patch` is based on
 `dsh-v0.2.2-alpha.2` (commit `f3803c96974a`). It applies cleanly to a clean
 base and reverse-applies cleanly to the patched tree. The alpha.2-specific
@@ -69,6 +71,9 @@ git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.2-alpha.2.patch
 Both clones sit side by side: the patch files live in this repository, not in
 the upstream checkout, so the `../dsh-reasoning-compaction/` paths in
 the `git apply` commands are required.
+
+Nothing to apply on `dsh-v0.2.2-rc.1` or later: those builds already show both
+behaviors, and the patches above fail to apply there by design.
 
 ## Build and run
 

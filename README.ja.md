@@ -1,5 +1,7 @@
 # DSH 推論ブロック自動展開 ＆ 自動コンパクション進捗表示 — パッチ配布
 
+[English](README.md) | 日本語
+
 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) のクライアントチャット UI に 2 つの機能を追加するパッチセットです。フォークではなく、パッチオーバーレイとして提供します。
 
 ### 追加機能
@@ -18,12 +20,17 @@
 - **dsh-v0.2.2-alpha.2** (commit `f3803c9697`)
 - **dsh-v0.2.1-rc.2** (commit `687f282e86`)
 
+**DSH 0.2.2-rc.1 にパッチは不要です。** タグ `dsh-v0.2.2-rc.1`（commit `66491b05e3`）以降は上流本体が両機能を実装しているため、このオーバーレイは適用できない。`git apply --check` はすべての hunk で失敗し、rc.1 向けパッチは公開しない。rc.1 の `ReasoningRow.tsx` は生成中の推論ブロックを本文を含む最初の描画で自動展開し、手動で閉じれば以降は閉じたまま。`conversation-nodes/compaction.ts` は表示専用の `running` / `failed`（`CompactionProgressNode`）を同じ条件で組み立てる。ファイル・行番号の証拠と実際のコマンド出力は [`patches/evidence/RC1-NATIVE.md`](patches/evidence/RC1-NATIVE.md) に記録した。
+
 #### 検証状況 (alpha.2)
 `patches/evidence/VERIFICATION-dsh-v0.2.2-alpha.2.md` に詳細を記録しています。
 - アーティファクトビルド、i18n、ビルドチェックなどのゲートをすべて通過。
 - 特定の UI チャットテスト（311件）をすべて通過。
 - **検証の制約**: より広範なGUIテストとブラウザ再現試験は未通過です。なお、一部の失敗は未変更の上流版でも再現しており、パッチ適用版の実ブラウザ動作確認は成功しています。
 - ブラウザでの実機検証（2026-10-29）にて、自動展開、コンパクション進捗表示、リロード後の永続化などのユーザー向け機能が正常に動作することを確認済み。
+
+#### 検証状況 (rc.2)
+`patches/evidence/VERIFICATION.md` は rc.2 の検証記録で、alpha.2 の結果は含まない。rc.2 の web-e2e で失敗した項目はホスト環境側（WebKit 実行ファイルの欠如、shared skills catalog が slash menu の候補と永続 replay snapshot に混入する、Windows の区切り文字が golden に現れる、1 件の replayed stream タイムアウト）であり、UI の回帰ではない。hero first-prompt spec は rc.2 lane で通過した。
 
 ### 適用方法
 
@@ -41,6 +48,8 @@ git apply --check ../dsh-reasoning-compaction/patches/dsh-v0.2.2-alpha.2.patch
 git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.2-alpha.2.patch
 ```
 ※ パッチファイルはこのリポジトリに保持されているため、`../dsh-reasoning-compaction/` などの相対パス指定が必要です。
+
+`dsh-v0.2.2-rc.1` 以降では適用するものはない。これらのビルドは両機能をすでに持っており、上記パッチは意図通り適用できない。
 
 ### ビルドと実行
 ```sh

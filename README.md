@@ -22,9 +22,9 @@ shipped as a patch overlay instead of a forked tree.
   never render as running progress. `/compact` markers and Trajectory views
   keep their existing behaviour.
 
-Supported upstream versions: tag `dsh-v0.2.2-alpha.2` (commit `f3803c9697`) and tag `dsh-v0.2.1-rc.2` (commit `687f282e86`), with one patch per version.
+Supported upstream versions: tag `dsh-v0.2.2-rc.1` (commit `66491b05e3`), tag `dsh-v0.2.2-alpha.2` (commit `f3803c9697`), and tag `dsh-v0.2.1-rc.2` (commit `687f282e86`), with one patch per version.
 
-**DSH 0.2.2-rc.1 needs no patch.** From tag `dsh-v0.2.2-rc.1` (commit `66491b05e3`) upstream ships both behaviors itself: `ReasoningRow.tsx` auto-expands a generating reasoning block at the first render that has body text and respects a manual close, and `conversation-nodes/compaction.ts` builds the display-only `running` / `failed` `CompactionProgressNode` with the same gating this overlay added. Neither patch applies to that tag — `git apply --check` fails on every hunk — and no rc.1 patch is published. The file/line evidence and the exact command output are in [`patches/evidence/RC1-NATIVE.md`](patches/evidence/RC1-NATIVE.md).
+**DSH 0.2.2-rc.1 needs its own patch.** Upstream at that tag has neither behavior: `ReasoningRow.tsx` carries no `generationLive` and no auto-expand effect, and `conversation-nodes/compaction.ts` builds no `CompactionProgressNode`. `git grep -l` for either symbol over `packages/client` returns nothing, and the tag's `ReasoningRow.tsx` (112 lines) contains no `useEffect` or `setExpanded`. The alpha.2 patch stops applying there because rc.1 rewrote the chat structure (the reasoning Body Slot gained `rawText`, and `fileMentions` moved to `AssistantNodeInjected`), not because upstream absorbed the behavior, so the overlay was re-ported: [`patches/dsh-v0.2.2-rc.1.patch`](patches/dsh-v0.2.2-rc.1.patch), 18 files, `git apply --check` passes on a clean checkout of the tag and reverse-applies to the patched tree. Command output, the five conflict resolutions, and the rc.1 verification results are in [`patches/evidence/RC1-PATCH.md`](patches/evidence/RC1-PATCH.md). An earlier record (`RC1-NATIVE.md`) claimed upstream already shipped both; it read a working tree that already had the overlay applied.
 
 `patches/dsh-v0.2.2-alpha.2.patch` is based on
 `dsh-v0.2.2-alpha.2` (commit `f3803c96974a`). It applies cleanly to a clean
@@ -53,9 +53,10 @@ on that tag checkout, `git diff --exit-code 85c0b8631d` against this
 repository's `rc2-overlay` branch tip is empty. Only the client chat UI
 changed; the server-side compaction protocol and durable records are unchanged.
 The source of the patch lives on the `rc2-overlay` branch of this repository,
-re-landed on the rc.2 chat UI structure. The rc.1 patch was retired with
-the rc.2 patch; the rc.1 tree lives on in this repository's history and on
-the pushed `rc1-overlay` branch.
+re-landed on the rc.2 chat UI structure. The 0.2.1-rc.1 patch was retired with
+the rc.2 patch; that tree lives on in this repository's history and on the
+pushed `rc1-overlay` branch. (Do not confuse it with `dsh-v0.2.2-rc.1`, which is
+a later tag and has its own patch below.)
 
 ## Apply
 
@@ -72,8 +73,9 @@ Both clones sit side by side: the patch files live in this repository, not in
 the upstream checkout, so the `../dsh-reasoning-compaction/` paths in
 the `git apply` commands are required.
 
-Nothing to apply on `dsh-v0.2.2-rc.1` or later: those builds already show both
-behaviors, and the patches above fail to apply there by design.
+Each patch targets exactly one tag. The alpha.2 and rc.2 patches do not apply on
+`dsh-v0.2.2-rc.1`; that tag has its own patch, and the behavior it adds is not in
+upstream.
 
 ## Build and run
 

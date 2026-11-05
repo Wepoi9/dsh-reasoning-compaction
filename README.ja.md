@@ -17,10 +17,11 @@
 ### サポートバージョン
 以下のタグ（コミット）に対応したパッチを提供しています。
 
+- **dsh-v0.2.2-rc.1** (commit `66491b05e3`)
 - **dsh-v0.2.2-alpha.2** (commit `f3803c9697`)
 - **dsh-v0.2.1-rc.2** (commit `687f282e86`)
 
-**DSH 0.2.2-rc.1 にパッチは不要です。** タグ `dsh-v0.2.2-rc.1`（commit `66491b05e3`）以降は上流本体が両機能を実装しているため、このオーバーレイは適用できない。`git apply --check` はすべての hunk で失敗し、rc.1 向けパッチは公開しない。rc.1 の `ReasoningRow.tsx` は生成中の推論ブロックを本文を含む最初の描画で自動展開し、手動で閉じれば以降は閉じたまま。`conversation-nodes/compaction.ts` は表示専用の `running` / `failed`（`CompactionProgressNode`）を同じ条件で組み立てる。ファイル・行番号の証拠と実際のコマンド出力は [`patches/evidence/RC1-NATIVE.md`](patches/evidence/RC1-NATIVE.md) に記録した。
+**DSH 0.2.2-rc.1 にはこのオーバーレイが必要です。** タグ `dsh-v0.2.2-rc.1` の上流には両機能とも入っていません。`ReasoningRow.tsx` に `generationLive` も自動展開の effect もなく、`conversation-nodes/compaction.ts` は `CompactionProgressNode` を組み立てません。`packages/client` を対象にした `git grep -l` はどちらのシンボルも0件で、同タグの `ReasoningRow.tsx`（112行）には `useEffect` と `setExpanded` がありません。alpha.2 用パッチが rc.1 で当たらないのは、rc.1 がチャット構造を作り直したため（推論 Body Slot に `rawText` が増え、`fileMentions` が `AssistantNodeInjected` へ移動）で、上流が機能を取り込んだからではありません。そこで rc.1 向けに移植したのが [`patches/dsh-v0.2.2-rc.1.patch`](patches/dsh-v0.2.2-rc.1.patch)（18ファイル）です。クリーンなタグ checkout で `git apply --check` が通過し、パッチ適用済みツリーへは逆適用も通ります。コマンド出力・衝突5件の解決内容・rc.1 の検証結果は [`patches/evidence/RC1-PATCH.md`](patches/evidence/RC1-PATCH.md) に記録しました。以前の記録（`RC1-NATIVE.md`）は「上流が実装済み」としていましたが、これはオーバーレイ適用済みの作業ツリーを読んだための誤りです。
 
 #### 検証状況 (alpha.2)
 `patches/evidence/VERIFICATION-dsh-v0.2.2-alpha.2.md` に詳細を記録しています。
@@ -49,7 +50,7 @@ git apply ../dsh-reasoning-compaction/patches/dsh-v0.2.2-alpha.2.patch
 ```
 ※ パッチファイルはこのリポジトリに保持されているため、`../dsh-reasoning-compaction/` などの相対パス指定が必要です。
 
-`dsh-v0.2.2-rc.1` 以降では適用するものはない。これらのビルドは両機能をすでに持っており、上記パッチは意図通り適用できない。
+パッチはタグごとに1本で、互いに流用できません。alpha.2 用と rc.2 用は `dsh-v0.2.2-rc.1` には当たらないため、rc.1 には rc.1 用パッチを使います。rc.1 の2機能は上流には入っていません。
 
 ### ビルドと実行
 ```sh
